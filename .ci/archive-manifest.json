@@ -1,0 +1,110 @@
+{
+  "source_commit": "1b556d73f80e69f512881eab3331e6e9f70e5bf5",
+  "files": [
+    {
+      "original": ".github/workflows/assign.yml",
+      "archive": ".ci/archived-workflows/assign.yml",
+      "sha256": "8a607dfc9597cf80f193f90149f7a58c03045b966a6061b85f4a9773d5f43a79"
+    },
+    {
+      "original": ".github/workflows/auto-close-duplicates.yml",
+      "archive": ".ci/archived-workflows/auto-close-duplicates.yml",
+      "sha256": "a152fcb82cb7a7bafc4bf8e0bc026df3998598d4ca230a8e009cc8b6098a526a"
+    },
+    {
+      "original": ".github/workflows/backfill-duplicate-comments.yml",
+      "archive": ".ci/archived-workflows/backfill-duplicate-comments.yml",
+      "sha256": "8be62feccf287148af6948b9ddb719f357ce7538853019d09d475001092b987a"
+    },
+    {
+      "original": ".github/workflows/build_all.yml",
+      "archive": ".ci/archived-workflows/build_all.yml",
+      "sha256": "7c86b3070b208fab4a57932a3b0e593df33773f708833de25a629289da3fb7e3"
+    },
+    {
+      "original": ".github/workflows/build_check_cache.yml",
+      "archive": ".ci/archived-workflows/build_check_cache.yml",
+      "sha256": "eacf5de897b1e786f6933905d94e8c6178d925c677bda7b52eb16035f1a7102b"
+    },
+    {
+      "original": ".github/workflows/build_deps.yml",
+      "archive": ".ci/archived-workflows/build_deps.yml",
+      "sha256": "3f1c70d6fb0dbb95ff644ed82db58f9d0c5a82747ffb2a3e1830ac64ef5cd90f"
+    },
+    {
+      "original": ".github/workflows/build_linux_appimage.yml",
+      "archive": ".ci/archived-workflows/build_linux_appimage.yml",
+      "sha256": "96c20bb20295efa48f6c166f6eb1fde24f89c37153fbe7568c079beecf5d8281"
+    },
+    {
+      "original": ".github/workflows/build_linux_portable.yml",
+      "archive": ".ci/archived-workflows/build_linux_portable.yml",
+      "sha256": "2cbb78b43ddfdbc074cfdfd781809b60a7c0d9fc0af0b67f92d68e8ee26bba4a"
+    },
+    {
+      "original": ".github/workflows/build_macos_bridge.yml",
+      "archive": ".ci/archived-workflows/build_macos_bridge.yml",
+      "sha256": "56fec171b1a2cef1a48f44962371a7ea555c9ed901643d9ca1504c14ea403d66"
+    },
+    {
+      "original": ".github/workflows/build_orca.yml",
+      "archive": ".ci/archived-workflows/build_orca.yml",
+      "sha256": "b5725f4c825306a5fa6df3f587b9eb0872d5429449abff4a1e7dc2c1e8ec76e7"
+    },
+    {
+      "original": ".github/workflows/build_rpm_fedora.yml",
+      "archive": ".ci/archived-workflows/build_rpm_fedora.yml",
+      "sha256": "0dc4a0d741899425d736932afa5a459cb4216fca6a47e71f40d4e62d4c1d3f69"
+    },
+    {
+      "original": ".github/workflows/build_windows_bridge.yml",
+      "archive": ".ci/archived-workflows/build_windows_bridge.yml",
+      "sha256": "de5b5e55b8e3f2dec43d35f93b81a5918d58be325acc81c771beac14dbeced22"
+    },
+    {
+      "original": ".github/workflows/check_locale.yml",
+      "archive": ".ci/archived-workflows/check_locale.yml",
+      "sha256": "33c1b27724116971bb917008b8d6fca4b81a9006c350e5f931839688f0bf6664"
+    },
+    {
+      "original": ".github/workflows/check_profiles.yml",
+      "archive": ".ci/archived-workflows/check_profiles.yml",
+      "sha256": "b397faffa3a24f9daf932c879ca7bb602f833bb67271ae0f478d196799ba51d7"
+    },
+    {
+      "original": ".github/workflows/check_profiles_comment.yml",
+      "archive": ".ci/archived-workflows/check_profiles_comment.yml",
+      "sha256": "81e43511dbfc30acb4eb6f8fbadff2b6286e19349d57ce1278d795cf4cabd98b"
+    },
+    {
+      "original": ".github/workflows/dedupe-issues.yml",
+      "archive": ".ci/archived-workflows/dedupe-issues.yml",
+      "sha256": "cec6d4dabcb2a4c47efc6ef1f9c60f3d1b153bbfdc1ef3838d83c039509f3fe9"
+    },
+    {
+      "original": ".github/workflows/doxygen-docs.yml",
+      "archive": ".ci/archived-workflows/doxygen-docs.yml",
+      "sha256": "1fab2ba56cb40bedb29b9763de6f18e1f62d53342a21dd4794d38746a6c49324"
+    },
+    {
+      "original": ".github/workflows/my_build_all.yml",
+      "archive": ".ci/archived-workflows/my_build_all.yml",
+      "sha256": "73367ffe71d38a1a3e499cac1ef88a4be2e894a6e36c8ee08f94beaa97d96d93"
+    },
+    {
+      "original": ".github/workflows/shellcheck.yml",
+      "archive": ".ci/archived-workflows/shellcheck.yml",
+      "sha256": "b6eb66817fed858bda95db1a764d404cf6a72abd923dd1dbb39461f1a3c6b35b"
+    },
+    {
+      "original": ".github/workflows/update-translation.yml",
+      "archive": ".ci/archived-workflows/update-translation.yml",
+      "sha256": "5978095e31a2ba97bb91f27da11ff9e54244b7dddadfc73d7a7f996ebc79416c"
+    },
+    {
+      "original": ".github/workflows/winget_updater.yml",
+      "archive": ".ci/archived-workflows/winget_updater.yml",
+      "sha256": "490faf41c6724c186897a2d511d0f7b338bf3d0213a654a280e922fc3a063c19"
+    }
+  ]
+}

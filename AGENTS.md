@@ -21,3 +21,13 @@ The history favors concise, sentence-style subject lines with optional issue ref
 
 ## Security & Configuration Tips
 Follow `SECURITY.md` for vulnerability reporting. Keep API tokens and printer credentials out of tracked configs; use `sandboxes/` for experimental settings. When touching third-party code in `deps_src/`, record the upstream commit or release in your PR description and run the relevant platform build script to confirm integration.
+
+## Local CI policy
+
+Run checks through `.ci/local.sh`; read `.ci/README.md` for toolchains and matrix
+coverage. Future agents must not use GitHub-hosted CI or consume GitHub Actions
+credits. Keep workflow originals as inactive references in `.ci/archived-workflows`.
+Never dispatch, rerun, enable or regenerate hosted workflows. Preserve test
+coverage and report unavailable local platform/service gates explicitly. Do not
+register self-hosted runners, create CI tokens, change security settings or alter
+branch protection as part of CI work.

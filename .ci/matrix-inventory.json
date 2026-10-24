@@ -1,0 +1,2152 @@
+{
+  "assign.yml": {
+    "name": "Assign Issue",
+    "true": {
+      "schedule": [
+        {
+          "cron": "0 0 * * *"
+        }
+      ],
+      "issue_comment": {
+        "types": [
+          "created"
+        ]
+      },
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "assign": {
+        "permissions": {
+          "issues": "write"
+        },
+        "runs-on": "ubuntu-latest",
+        "steps": [
+          {
+            "name": "Assign the user or unassign stale assignments",
+            "uses": "takanome-dev/assign-issue-action@v2.2",
+            "with": {
+              "github_token": "${{ secrets.GITHUB_TOKEN }}",
+              "maintainers": "noisyfox,softfever",
+              "days_until_unassign": 30,
+              "block_assignment": false,
+              "reminder_days": 7,
+              "max_assignments": 12
+            }
+          }
+        ]
+      }
+    }
+  },
+  "auto-close-duplicates.yml": {
+    "name": "Auto-close duplicate issues",
+    "description": "Auto-closes issues that are duplicates of existing issues",
+    "true": {
+      "schedule": [
+        {
+          "cron": "0 9 * * *"
+        }
+      ],
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "auto-close-duplicates": {
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 10,
+        "permissions": {
+          "contents": "read",
+          "issues": "write"
+        },
+        "steps": [
+          {
+            "name": "Checkout repository",
+            "uses": "actions/checkout@v6"
+          },
+          {
+            "name": "Setup Bun",
+            "uses": "oven-sh/setup-bun@v2",
+            "with": {
+              "bun-version": "latest"
+            }
+          },
+          {
+            "name": "Auto-close duplicate issues",
+            "run": "bun run scripts/auto-close-duplicates.ts",
+            "env": {
+              "GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
+              "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
+              "GITHUB_REPOSITORY_NAME": "${{ github.event.repository.name }}",
+              "STATSIG_API_KEY": "${{ secrets.STATSIG_API_KEY }}"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "backfill-duplicate-comments.yml": {
+    "name": "Backfill Duplicate Comments",
+    "description": "Triggers duplicate detection for old issues that don't have duplicate comments",
+    "true": {
+      "workflow_dispatch": {
+        "inputs": {
+          "days_back": {
+            "description": "How many days back to look for old issues",
+            "required": false,
+            "default": "90",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "Dry run mode (true to only log what would be done)",
+            "required": false,
+            "default": "true",
+            "type": "choice",
+            "options": [
+              "true",
+              "false"
+            ]
+          }
+        }
+      }
+    },
+    "jobs": {
+      "backfill-duplicate-comments": {
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 30,
+        "permissions": {
+          "contents": "read",
+          "issues": "read",
+          "actions": "write"
+        },
+        "steps": [
+          {
+            "name": "Checkout repository",
+            "uses": "actions/checkout@v6"
+          },
+          {
+            "name": "Setup Bun",
+            "uses": "oven-sh/setup-bun@v2",
+            "with": {
+              "bun-version": "latest"
+            }
+          },
+          {
+            "name": "Backfill duplicate comments",
+            "run": "bun run scripts/backfill-duplicate-comments.ts",
+            "env": {
+              "GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
+              "DAYS_BACK": "${{ inputs.days_back }}",
+              "DRY_RUN": "${{ inputs.dry_run }}"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "build_all.yml": {
+    "name": "Build all (manual only)",
+    "true": {
+      "workflow_dispatch": {
+        "inputs": {
+          "build-deps-only": {
+            "description": "Only build dependencies (bypasses caching)",
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    "concurrency": {
+      "group": "${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}",
+      "cancel-in-progress": true
+    },
+    "jobs": {
+      "build_linux": {
+        "strategy": {
+          "fail-fast": false
+        },
+        "uses": "./.github/workflows/build_check_cache.yml",
+        "with": {
+          "os": "${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-24.04' }}",
+          "build-deps-only": "${{ inputs.build-deps-only || false }}"
+        },
+        "secrets": "inherit"
+      },
+      "build_windows": {
+        "uses": "./.github/workflows/build_check_cache.yml",
+        "with": {
+          "os": "${{ vars.SELF_HOSTED && 'orca-win-server' || 'windows-latest' }}",
+          "build-deps-only": "${{ inputs.build-deps-only || false }}"
+        },
+        "secrets": "inherit"
+      },
+      "build_macos_arch": {
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "arch": [
+              "arm64",
+              "x86_64"
+            ]
+          }
+        },
+        "uses": "./.github/workflows/build_check_cache.yml",
+        "with": {
+          "os": "${{ vars.SELF_HOSTED && 'orca-macos-arm64' || 'macos-14' }}",
+          "arch": "${{ matrix.arch }}",
+          "build-deps-only": "${{ inputs.build-deps-only || false }}"
+        },
+        "secrets": "inherit"
+      },
+      "build_macos_universal": {
+        "name": "Build macOS Universal",
+        "needs": "build_macos_arch",
+        "if": "${{ !cancelled() && needs.build_macos_arch.result == 'success' && !inputs.build-deps-only }}",
+        "uses": "./.github/workflows/build_orca.yml",
+        "with": {
+          "os": "${{ vars.SELF_HOSTED && 'orca-macos-arm64' || 'macos-14' }}",
+          "arch": "universal",
+          "macos-combine-only": true
+        },
+        "secrets": "inherit"
+      }
+    }
+  },
+  "build_check_cache.yml": {
+    "name": "Check Cache",
+    "true": {
+      "workflow_call": {
+        "inputs": {
+          "os": {
+            "required": true,
+            "type": "string"
+          },
+          "arch": {
+            "required": false,
+            "type": "string"
+          },
+          "build-deps-only": {
+            "required": false,
+            "type": "boolean"
+          },
+          "force-build": {
+            "required": false,
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "jobs": {
+      "check_cache": {
+        "name": "Check Cache",
+        "runs-on": "${{ inputs.os }}",
+        "outputs": {
+          "cache-key": "${{ steps.set_outputs.outputs.cache-key }}",
+          "cache-path": "${{ steps.set_outputs.outputs.cache-path }}",
+          "valid-cache": "${{ steps.cache_deps.outputs.cache-hit }}"
+        },
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "name": "set outputs",
+            "id": "set_outputs",
+            "env": {
+              "cache-os": "${{ runner.os == 'macOS' && format('macos-{0}', inputs.arch) || (runner.os == 'Windows' && 'windows' || 'linux-clang') }}",
+              "dep-folder-name": "${{ runner.os == 'macOS' && format('/{0}', inputs.arch) || '/OrcaSlicer_dep' }}",
+              "output-cmd": "${{ runner.os == 'Windows' && '$env:GITHUB_OUTPUT' || '\"$GITHUB_OUTPUT\"'}}"
+            },
+            "run": "echo cache-key=${{ env.cache-os }}-cache-orcaslicer_deps-build-${{ hashFiles('deps/**') }} >> ${{ env.output-cmd }}\necho cache-path=${{ github.workspace }}/deps/build${{ env.dep-folder-name }} >> ${{ env.output-cmd }}\n  \n"
+          },
+          {
+            "name": "load cache",
+            "id": "cache_deps",
+            "uses": "actions/cache@v5",
+            "with": {
+              "path": "${{ steps.set_outputs.outputs.cache-path }}",
+              "key": "${{ steps.set_outputs.outputs.cache-key }}",
+              "lookup-only": true
+            }
+          }
+        ]
+      },
+      "build_deps": {
+        "name": "Build Deps",
+        "needs": [
+          "check_cache"
+        ],
+        "uses": "./.github/workflows/build_deps.yml",
+        "with": {
+          "cache-key": "${{ needs.check_cache.outputs.cache-key }}",
+          "cache-path": "${{ needs.check_cache.outputs.cache-path }}",
+          "valid-cache": "${{ needs.check_cache.outputs.valid-cache == 'true' }}",
+          "os": "${{ inputs.os }}",
+          "arch": "${{ inputs.arch }}",
+          "build-deps-only": "${{ inputs.build-deps-only }}",
+          "force-build": "${{ inputs.force-build }}"
+        },
+        "secrets": "inherit"
+      }
+    }
+  },
+  "build_deps.yml": {
+    "true": {
+      "workflow_call": {
+        "inputs": {
+          "cache-key": {
+            "required": true,
+            "type": "string"
+          },
+          "cache-path": {
+            "required": true,
+            "type": "string"
+          },
+          "valid-cache": {
+            "required": true,
+            "type": "boolean"
+          },
+          "os": {
+            "required": true,
+            "type": "string"
+          },
+          "arch": {
+            "required": false,
+            "type": "string"
+          },
+          "build-deps-only": {
+            "required": false,
+            "type": "boolean"
+          },
+          "force-build": {
+            "required": false,
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "jobs": {
+      "build_deps": {
+        "name": "Build Deps",
+        "if": "${{ !cancelled() && (inputs.build-deps-only || inputs.force-build || inputs.valid-cache != true) }}",
+        "runs-on": "${{ inputs.os }}",
+        "env": {
+          "date": null
+        },
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "name": "load cached deps",
+            "uses": "actions/cache@v5",
+            "with": {
+              "path": "${{ inputs.cache-path }}",
+              "key": "${{ inputs.cache-key }}"
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "setup dev on Windows",
+            "if": "runner.os == 'Windows'",
+            "uses": "microsoft/setup-msbuild@v3"
+          },
+          {
+            "name": "Get the date on Ubuntu and macOS",
+            "if": "runner.os != 'Windows'",
+            "run": "echo \"date=$(date +'%Y%m%d')\" >> $GITHUB_ENV",
+            "shell": "bash"
+          },
+          {
+            "name": "Get the date on Windows",
+            "if": "runner.os == 'Windows'",
+            "run": "echo \"date=$(Get-Date -Format 'yyyyMMdd')\" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8",
+            "shell": "pwsh"
+          },
+          {
+            "name": "Build on Windows",
+            "if": "runner.os == 'Windows'",
+            "working-directory": "${{ github.workspace }}",
+            "run": "if (-not \"${{ vars.SELF_HOSTED }}\") {\n  choco install strawberryperl\n}\n.\\build_release_vs.bat deps\n.\\build_release_vs.bat pack\n",
+            "shell": "pwsh"
+          },
+          {
+            "name": "Build on Mac ${{ inputs.arch }}",
+            "if": "runner.os == 'macOS'",
+            "working-directory": "${{ github.workspace }}",
+            "run": "if [ -z \"${{ vars.SELF_HOSTED }}\" ]; then\n  brew install automake texinfo libtool\nfi\n./build_release_macos.sh -dx ${{ !vars.SELF_HOSTED && '-1' || '' }} -a ${{ inputs.arch }} -t 10.15\n(cd \"${{ github.workspace }}/deps/build/${{ inputs.arch }}\" && \\\nfind . -mindepth 1 -maxdepth 1 ! -name 'OrcaSlicer_dep' -exec rm -rf {} +)\n"
+          },
+          {
+            "name": "Apt-Install Dependencies",
+            "if": "runner.os == 'Linux' && !vars.SELF_HOSTED",
+            "uses": "./.github/actions/apt-install-deps"
+          },
+          {
+            "name": "Build on Ubuntu",
+            "if": "runner.os == 'Linux'",
+            "working-directory": "${{ github.workspace }}",
+            "run": "mkdir -p ${{ github.workspace }}/deps/build/destdir\n./build_linux.sh -drlL\ncd deps/build\ntar -czvf OrcaSlicer_dep_ubuntu_$(date +\"%Y%m%d\").tar.gz destdir\n"
+          }
+        ]
+      },
+      "build_orca": {
+        "name": "Build OrcaSlicer",
+        "needs": [
+          "build_deps"
+        ],
+        "if": "${{ !cancelled() && !inputs.build-deps-only && (inputs.force-build || (inputs.valid-cache == true && needs.build_deps.result == 'skipped') || (inputs.valid-cache != true && success())) }}",
+        "uses": "./.github/workflows/build_orca.yml",
+        "with": {
+          "cache-key": "${{ inputs.cache-key }}",
+          "cache-path": "${{ inputs.cache-path }}",
+          "os": "${{ inputs.os }}",
+          "arch": "${{ inputs.arch }}"
+        },
+        "secrets": "inherit"
+      }
+    }
+  },
+  "build_linux_appimage.yml": {
+    "name": "Build Linux AppImage",
+    "true": {
+      "workflow_call": null,
+      "workflow_dispatch": null
+    },
+    "concurrency": {
+      "group": "build-linux-appimage-${{ github.ref }}",
+      "cancel-in-progress": true
+    },
+    "env": {
+      "CACHE_REV": "v1"
+    },
+    "jobs": {
+      "linux_appimage_ubuntu24": {
+        "name": "Linux AppImage (ubuntu-24.04)",
+        "runs-on": "ubuntu-24.04",
+        "timeout-minutes": 360,
+        "env": {
+          "DIST_ID": "ubuntu24.04",
+          "EVENT_TAG": "${{ github.event.release.tag_name }}"
+        },
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "Compute version",
+            "shell": "bash",
+            "run": "set -euo pipefail\ntag=\"${EVENT_TAG:-${GITHUB_REF_NAME:-}}\"\nif [[ \"$tag\" == v* ]]; then\n  ver=\"${tag#v}\"\nelse\n  ver=\"git${GITHUB_SHA::7}\"\nfi\necho \"VER=$ver\" >> \"$GITHUB_ENV\"\n"
+          },
+          {
+            "name": "Compute deps cache key",
+            "shell": "bash",
+            "run": "set -euo pipefail\ndeps_tree=\"$(git rev-parse HEAD:deps 2>/dev/null || echo no-deps)\"\nrecipe_hash=\"$(find build_linux.sh scripts/linux.d -type f -print0 | sort -z | xargs -0 cat | sha256sum | cut -c1-12)\"\necho \"DEPS_CACHE_KEY=linux-${DIST_ID}-deps-${deps_tree}-${recipe_hash}-${CACHE_REV}\" >> \"$GITHUB_ENV\"\n"
+          },
+          {
+            "name": "Apt-Install Dependencies",
+            "uses": "./.github/actions/apt-install-deps"
+          },
+          {
+            "name": "Linux - cache deps",
+            "id": "cache_linux_deps",
+            "uses": "actions/cache@v5",
+            "with": {
+              "path": "${{ github.workspace }}/deps/build/OrcaSlicer_dep",
+              "key": "${{ env.DEPS_CACHE_KEY }}"
+            }
+          },
+          {
+            "name": "Linux - build deps if missing",
+            "if": "steps.cache_linux_deps.outputs.cache-hit != 'true'",
+            "shell": "bash",
+            "run": "set -euo pipefail\nfor attempt in 1 2 3; do\n  echo \"Build Linux deps attempt $attempt\"\n  if ./build_linux.sh -drlL; then\n    exit 0\n  fi\n  if [ \"$attempt\" -lt 3 ]; then\n    echo \"Transient dependency download/build failure, retrying after backoff\"\n    sleep $((attempt * 20))\n  fi\ndone\nexit 1\n"
+          },
+          {
+            "name": "Linux - build AppImage",
+            "shell": "bash",
+            "run": "set -euo pipefail\nrm -rf build build-dbg build-dbginfo out\nmkdir -p out\n\n./build_linux.sh -istrlL\n./scripts/check_appimage_libs.sh ./build/package ./build/package/bin/orca-slicer\n\nmapfile -t appimages < <(find build -maxdepth 3 -type f -name '*.AppImage' ! -name 'appimagetool.AppImage' | LC_ALL=C sort)\n\nif (( ${#appimages[@]} == 0 )); then\n  echo \"ERROR: AppImage not produced\"\n  find build -maxdepth 3 -type f | LC_ALL=C sort\n  exit 1\nfi\n\nif (( ${#appimages[@]} > 1 )); then\n  echo \"INFO: multiple AppImage candidates found, using the first sorted entry\"\n  printf '%s\\n' \"${appimages[@]}\"\nfi\n\nappimage=\"${appimages[0]}\"\nmv \"$appimage\" \"out/OrcaSlicer-BMCU_Linux_AppImage_${DIST_ID}_amd64_${VER}.AppImage\"\nchmod +x \"out/OrcaSlicer-BMCU_Linux_AppImage_${DIST_ID}_amd64_${VER}.AppImage\"\n"
+          },
+          {
+            "name": "Linux - checksums",
+            "shell": "bash",
+            "run": "set -euo pipefail\n(cd out && sha256sum * > \"SHA256SUMS_${DIST_ID}_appimage.txt\")\n"
+          },
+          {
+            "name": "Upload artifacts (Linux AppImage ubuntu24.04)",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "orcaslicer-bmcu-linux-appimage-${{ env.DIST_ID }}-${{ github.sha }}",
+              "path": "out/",
+              "if-no-files-found": "error"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "build_linux_portable.yml": {
+    "name": "Build Linux Portable",
+    "true": {
+      "workflow_call": null,
+      "workflow_dispatch": null
+    },
+    "concurrency": {
+      "group": "build-linux-portable-${{ github.ref }}",
+      "cancel-in-progress": true
+    },
+    "env": {
+      "CACHE_REV": "v1"
+    },
+    "jobs": {
+      "linux_ubuntu22": {
+        "name": "Linux (ubuntu-22.04)",
+        "runs-on": "ubuntu-22.04",
+        "timeout-minutes": 360,
+        "env": {
+          "DIST_ID": "ubuntu22.04",
+          "EVENT_TAG": "${{ github.event.release.tag_name }}"
+        },
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "Compute version",
+            "shell": "bash",
+            "run": "set -euo pipefail\ntag=\"${EVENT_TAG:-${GITHUB_REF_NAME:-}}\"\nif [[ \"$tag\" == v* ]]; then\n  ver=\"${tag#v}\"\nelse\n  ver=\"git${GITHUB_SHA::7}\"\nfi\necho \"VER=$ver\" >> \"$GITHUB_ENV\"\n"
+          },
+          {
+            "name": "Compute deps cache key",
+            "shell": "bash",
+            "run": "set -euo pipefail\ndeps_tree=\"$(git rev-parse HEAD:deps 2>/dev/null || echo no-deps)\"\nrecipe_hash=\"$(find build_linux.sh scripts/linux.d -type f -print0 | sort -z | xargs -0 cat | sha256sum | cut -c1-12)\"\necho \"DEPS_CACHE_KEY=linux-${DIST_ID}-deps-${deps_tree}-${recipe_hash}-${CACHE_REV}\" >> \"$GITHUB_ENV\"\n"
+          },
+          {
+            "name": "Apt-Install Dependencies",
+            "uses": "./.github/actions/apt-install-deps"
+          },
+          {
+            "name": "Linux - cache deps",
+            "id": "cache_linux_deps",
+            "uses": "actions/cache@v5",
+            "with": {
+              "path": "${{ github.workspace }}/deps/build/OrcaSlicer_dep",
+              "key": "${{ env.DEPS_CACHE_KEY }}"
+            }
+          },
+          {
+            "name": "Linux - build deps if missing",
+            "if": "steps.cache_linux_deps.outputs.cache-hit != 'true'",
+            "shell": "bash",
+            "run": "set -euo pipefail\nfor attempt in 1 2 3; do\n  echo \"Build Linux deps attempt $attempt\"\n  if ./build_linux.sh -drlL; then\n    exit 0\n  fi\n  if [ \"$attempt\" -lt 3 ]; then\n    echo \"Transient dependency download/build failure, retrying after backoff\"\n    sleep $((attempt * 20))\n  fi\ndone\nexit 1\n"
+          },
+          {
+            "name": "Linux - build + install",
+            "shell": "bash",
+            "run": "set -euo pipefail\nrm -rf build install-dir out\nmkdir -p out\n\ncmake -S . -B build -G \"Ninja Multi-Config\" \\\n  -DCMAKE_PREFIX_PATH=\"${PWD}/deps/build/OrcaSlicer_dep/usr/local\" \\\n  -DSLIC3R_STATIC=1 \\\n  -DSLIC3R_GTK=3 \\\n  -DBBL_RELEASE_TO_PUBLIC=1 \\\n  -DBBL_INTERNAL_TESTING=0 \\\n  -DSLIC3R_PCH=ON \\\n  -DORCA_TOOLS=ON \\\n  -DCMAKE_INSTALL_PREFIX=\"${PWD}/install-dir\"\n\ncmake --build build --config Release --target install -j\"$(nproc)\"\n\n./scripts/run_gettext.sh\nmkdir -p install-dir/resources/i18n\ncp -a resources/i18n/. install-dir/resources/i18n/\n\napp_bin=\"\"\nfor candidate in \\\n  \"install-dir/bin/OrcaSlicer\" \\\n  \"install-dir/bin/orca-slicer\" \\\n  \"install-dir/OrcaSlicer\" \\\n  \"install-dir/orca-slicer\"; do\n  if [ -x \"$candidate\" ]; then\n    app_bin=\"${candidate#install-dir/}\"\n    break\n  fi\ndone\n\nif [ -z \"$app_bin\" ]; then\n  echo \"ERROR: installed OrcaSlicer binary not found\"\n  find install-dir -maxdepth 3 -type f | sort\n  exit 1\nfi\n\necho \"APP_BIN=$app_bin\" >> \"$GITHUB_ENV\"\ntar -C install-dir -czf \"out/OrcaSlicer-BMCU_LinuxDir_${DIST_ID}_amd64_${VER}.tar.gz\" .\n"
+          },
+          {
+            "name": "Linux - build AppImage (best-effort)",
+            "shell": "bash",
+            "run": "set -euo pipefail\nif [ -x \"build/src/build_linux_image.sh\" ]; then\n  (cd build && ./src/build_linux_image.sh -i -R Release) || true\nfi\n\nappimage=\"$(find build -maxdepth 3 -type f -name '*.AppImage' | head -n 1 || true)\"\nif [ -n \"$appimage\" ]; then\n  mv \"$appimage\" \"out/OrcaSlicer-BMCU_${DIST_ID}_amd64_${VER}.AppImage\"\n  chmod +x \"out/OrcaSlicer-BMCU_${DIST_ID}_amd64_${VER}.AppImage\"\nelse\n  echo \"WARN: no AppImage produced\"\nfi\n"
+          },
+          {
+            "name": "Linux - build .deb from install-dir",
+            "shell": "bash",
+            "run": "set -euo pipefail\nsudo apt-get update\nsudo apt-get install -y dpkg-dev fakeroot binutils\n\nrm -rf pkgroot debian\nmkdir -p pkgroot/DEBIAN pkgroot/opt/orcaslicer pkgroot/usr/bin\ncp -a install-dir/. pkgroot/opt/orcaslicer/\n\ncat > pkgroot/usr/bin/orca-slicer-bmcu <<EOF\n#!/bin/sh\nexec /opt/orcaslicer/${APP_BIN} \"$@\"\nEOF\nchmod 0755 pkgroot/usr/bin/orca-slicer-bmcu\n\nif [[ \"${EVENT_TAG:-${GITHUB_REF_NAME:-}}\" == v* ]]; then\n  deb_ver=\"${VER}~${DIST_ID}\"\nelse\n  deb_ver=\"0.0~${VER}~${DIST_ID}\"\nfi\n\nmkdir -p debian\ncat > debian/control <<'EOF'\nSource: orcaslicer-bmcu\nSection: utils\nPriority: optional\nMaintainer: PJARCZAK CI <ci@invalid>\nStandards-Version: 4.6.2\n\nPackage: orcaslicer-bmcu\nArchitecture: amd64\nDescription: dummy control for dpkg-shlibdeps\nEOF\n\ndepends=\"\"\nif [ -x \"pkgroot/opt/orcaslicer/${APP_BIN}\" ]; then\n  set +e\n  out=\"$(dpkg-shlibdeps --ignore-missing-info -O \\\n    -lpkgroot/opt/orcaslicer/bin \\\n    -lpkgroot/opt/orcaslicer/lib \\\n    -lpkgroot/opt/orcaslicer/lib64 \\\n    pkgroot/opt/orcaslicer/${APP_BIN} 2>&1)\"\n  rc=$?\n  set -e\n\n  if [ $rc -eq 0 ]; then\n    depends=\"$(printf \"%s\\n\" \"$out\" | sed -n 's/^shlibs:Depends=//p' | tail -n 1)\"\n  else\n    echo \"WARN: dpkg-shlibdeps failed:\"\n    echo \"$out\"\n  fi\nfi\n\nif [[ -z \"$depends\" ]]; then\n  depends=\"libc6, libstdc++6, libgcc-s1\"\nfi\n\ncat > pkgroot/DEBIAN/control <<EOF\nPackage: orcaslicer-bmcu\nVersion: ${deb_ver}\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: PJARCZAK CI <ci@invalid>\nDepends: ${depends}\nDescription: OrcaSlicer BMCU build (installed in /opt/orcaslicer)\n Wrapper: /usr/bin/orca-slicer-bmcu\nEOF\n\nfakeroot dpkg-deb --build pkgroot \"out/OrcaSlicer-BMCU_${DIST_ID}_amd64_${VER}.deb\"\n"
+          },
+          {
+            "name": "Linux - checksums",
+            "shell": "bash",
+            "run": "set -euo pipefail\n(cd out && sha256sum * > \"SHA256SUMS_${DIST_ID}.txt\")\n"
+          },
+          {
+            "name": "Upload artifacts (Linux ubuntu22.04)",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "orcaslicer-bmcu-linux-${{ env.DIST_ID }}-${{ github.sha }}",
+              "path": "out/",
+              "if-no-files-found": "error"
+            }
+          }
+        ]
+      },
+      "linux_ubuntu24": {
+        "name": "Linux (ubuntu-24.04)",
+        "runs-on": "ubuntu-24.04",
+        "timeout-minutes": 360,
+        "env": {
+          "DIST_ID": "ubuntu24.04",
+          "EVENT_TAG": "${{ github.event.release.tag_name }}"
+        },
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "Compute version",
+            "shell": "bash",
+            "run": "set -euo pipefail\ntag=\"${EVENT_TAG:-${GITHUB_REF_NAME:-}}\"\nif [[ \"$tag\" == v* ]]; then\n  ver=\"${tag#v}\"\nelse\n  ver=\"git${GITHUB_SHA::7}\"\nfi\necho \"VER=$ver\" >> \"$GITHUB_ENV\"\n"
+          },
+          {
+            "name": "Compute deps cache key",
+            "shell": "bash",
+            "run": "set -euo pipefail\ndeps_tree=\"$(git rev-parse HEAD:deps 2>/dev/null || echo no-deps)\"\nrecipe_hash=\"$(find build_linux.sh scripts/linux.d -type f -print0 | sort -z | xargs -0 cat | sha256sum | cut -c1-12)\"\necho \"DEPS_CACHE_KEY=linux-${DIST_ID}-deps-${deps_tree}-${recipe_hash}-${CACHE_REV}\" >> \"$GITHUB_ENV\"\n"
+          },
+          {
+            "name": "Apt-Install Dependencies",
+            "uses": "./.github/actions/apt-install-deps"
+          },
+          {
+            "name": "Linux - cache deps",
+            "id": "cache_linux_deps",
+            "uses": "actions/cache@v5",
+            "with": {
+              "path": "${{ github.workspace }}/deps/build/OrcaSlicer_dep",
+              "key": "${{ env.DEPS_CACHE_KEY }}"
+            }
+          },
+          {
+            "name": "Linux - build deps if missing",
+            "if": "steps.cache_linux_deps.outputs.cache-hit != 'true'",
+            "shell": "bash",
+            "run": "set -euo pipefail\nfor attempt in 1 2 3; do\n  echo \"Build Linux deps attempt $attempt\"\n  if ./build_linux.sh -drlL; then\n    exit 0\n  fi\n  if [ \"$attempt\" -lt 3 ]; then\n    echo \"Transient dependency download/build failure, retrying after backoff\"\n    sleep $((attempt * 20))\n  fi\ndone\nexit 1\n"
+          },
+          {
+            "name": "Linux - build + install",
+            "shell": "bash",
+            "run": "set -euo pipefail\nrm -rf build install-dir out\nmkdir -p out\n\ncmake -S . -B build -G \"Ninja Multi-Config\" \\\n  -DCMAKE_PREFIX_PATH=\"${PWD}/deps/build/OrcaSlicer_dep/usr/local\" \\\n  -DSLIC3R_STATIC=1 \\\n  -DSLIC3R_GTK=3 \\\n  -DBBL_RELEASE_TO_PUBLIC=1 \\\n  -DBBL_INTERNAL_TESTING=0 \\\n  -DSLIC3R_PCH=ON \\\n  -DORCA_TOOLS=ON \\\n  -DCMAKE_INSTALL_PREFIX=\"${PWD}/install-dir\"\n\ncmake --build build --config Release --target install -j\"$(nproc)\"\n\n./scripts/run_gettext.sh\nmkdir -p install-dir/resources/i18n\ncp -a resources/i18n/. install-dir/resources/i18n/\n\napp_bin=\"\"\nfor candidate in \\\n  \"install-dir/bin/OrcaSlicer\" \\\n  \"install-dir/bin/orca-slicer\" \\\n  \"install-dir/OrcaSlicer\" \\\n  \"install-dir/orca-slicer\"; do\n  if [ -x \"$candidate\" ]; then\n    app_bin=\"${candidate#install-dir/}\"\n    break\n  fi\ndone\n\nif [ -z \"$app_bin\" ]; then\n  echo \"ERROR: installed OrcaSlicer binary not found\"\n  find install-dir -maxdepth 3 -type f | sort\n  exit 1\nfi\n\necho \"APP_BIN=$app_bin\" >> \"$GITHUB_ENV\"\ntar -C install-dir -czf \"out/OrcaSlicer-BMCU_LinuxDir_${DIST_ID}_amd64_${VER}.tar.gz\" .\n"
+          },
+          {
+            "name": "Linux - build AppImage (best-effort)",
+            "shell": "bash",
+            "run": "set -euo pipefail\nif [ -x \"build/src/build_linux_image.sh\" ]; then\n  (cd build && ./src/build_linux_image.sh -i -R Release) || true\nfi\n\nappimage=\"$(find build -maxdepth 3 -type f -name '*.AppImage' | head -n 1 || true)\"\nif [ -n \"$appimage\" ]; then\n  mv \"$appimage\" \"out/OrcaSlicer-BMCU_${DIST_ID}_amd64_${VER}.AppImage\"\n  chmod +x \"out/OrcaSlicer-BMCU_${DIST_ID}_amd64_${VER}.AppImage\"\nelse\n  echo \"WARN: no AppImage produced\"\nfi\n"
+          },
+          {
+            "name": "Linux - build .deb from install-dir",
+            "shell": "bash",
+            "run": "set -euo pipefail\nsudo apt-get update\nsudo apt-get install -y dpkg-dev fakeroot binutils\n\nrm -rf pkgroot debian\nmkdir -p pkgroot/DEBIAN pkgroot/opt/orcaslicer pkgroot/usr/bin\ncp -a install-dir/. pkgroot/opt/orcaslicer/\n\ncat > pkgroot/usr/bin/orca-slicer-bmcu <<EOF\n#!/bin/sh\nexec /opt/orcaslicer/${APP_BIN} \"$@\"\nEOF\nchmod 0755 pkgroot/usr/bin/orca-slicer-bmcu\n\nif [[ \"${EVENT_TAG:-${GITHUB_REF_NAME:-}}\" == v* ]]; then\n  deb_ver=\"${VER}~${DIST_ID}\"\nelse\n  deb_ver=\"0.0~${VER}~${DIST_ID}\"\nfi\n\nmkdir -p debian\ncat > debian/control <<'EOF'\nSource: orcaslicer-bmcu\nSection: utils\nPriority: optional\nMaintainer: PJARCZAK CI <ci@invalid>\nStandards-Version: 4.6.2\n\nPackage: orcaslicer-bmcu\nArchitecture: amd64\nDescription: dummy control for dpkg-shlibdeps\nEOF\n\ndepends=\"\"\nif [ -x \"pkgroot/opt/orcaslicer/${APP_BIN}\" ]; then\n  set +e\n  out=\"$(dpkg-shlibdeps --ignore-missing-info -O \\\n    -lpkgroot/opt/orcaslicer/bin \\\n    -lpkgroot/opt/orcaslicer/lib \\\n    -lpkgroot/opt/orcaslicer/lib64 \\\n    pkgroot/opt/orcaslicer/${APP_BIN} 2>&1)\"\n  rc=$?\n  set -e\n\n  if [ $rc -eq 0 ]; then\n    depends=\"$(printf \"%s\\n\" \"$out\" | sed -n 's/^shlibs:Depends=//p' | tail -n 1)\"\n  else\n    echo \"WARN: dpkg-shlibdeps failed:\"\n    echo \"$out\"\n  fi\nfi\n\nif [[ -z \"$depends\" ]]; then\n  depends=\"libc6, libstdc++6, libgcc-s1\"\nfi\n\ncat > pkgroot/DEBIAN/control <<EOF\nPackage: orcaslicer-bmcu\nVersion: ${deb_ver}\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: PJARCZAK CI <ci@invalid>\nDepends: ${depends}\nDescription: OrcaSlicer BMCU build (installed in /opt/orcaslicer)\n Wrapper: /usr/bin/orca-slicer-bmcu\nEOF\n\nfakeroot dpkg-deb --build pkgroot \"out/OrcaSlicer-BMCU_${DIST_ID}_amd64_${VER}.deb\"\n"
+          },
+          {
+            "name": "Linux - checksums",
+            "shell": "bash",
+            "run": "set -euo pipefail\n(cd out && sha256sum * > \"SHA256SUMS_${DIST_ID}.txt\")\n"
+          },
+          {
+            "name": "Upload artifacts (Linux ubuntu24.04)",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "orcaslicer-bmcu-linux-${{ env.DIST_ID }}-${{ github.sha }}",
+              "path": "out/",
+              "if-no-files-found": "error"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "build_macos_bridge.yml": {
+    "name": "Build macOS with Linux bridge runtime",
+    "true": {
+      "workflow_call": null,
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "prepare_linux_bridge_runtime": {
+        "name": "Prepare Linux bridge runtime",
+        "runs-on": "ubuntu-24.04",
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "Apt-Install Dependencies",
+            "uses": "./.github/actions/apt-install-deps"
+          },
+          {
+            "name": "Build Linux deps",
+            "shell": "bash",
+            "run": "set -euo pipefail\nfor attempt in 1 2 3; do\n  echo \"Build Linux deps attempt $attempt\"\n  if ./build_linux.sh -drlL; then\n    exit 0\n  fi\n  if [ \"$attempt\" -lt 3 ]; then\n    echo \"Transient dependency download/build failure, retrying after backoff\"\n    sleep $((attempt * 20))\n  fi\ndone\nexit 1\n"
+          },
+          {
+            "name": "Configure linux bridge host build",
+            "shell": "bash",
+            "run": "cmake -S . -B build -G \"Ninja Multi-Config\" -DORCA_TOOLS=ON\n"
+          },
+          {
+            "name": "Build linux host runtime",
+            "shell": "bash",
+            "run": "cmake --build build --config Release --target pjarczak_bambu_linux_host\nbash tools/pjarczak_bambu_linux_host/package_linux_host_runtime.sh build\ntar -czvf linux_host_runtime_${{ github.sha }}.tar.gz -C tools/pjarczak_bambu_linux_host/runtime linux-x86_64\n"
+          },
+          {
+            "name": "Upload linux host runtime artifact",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "linux_host_runtime_${{ github.sha }}",
+              "path": "./linux_host_runtime_${{ github.sha }}.tar.gz",
+              "if-no-files-found": "error"
+            }
+          }
+        ]
+      },
+      "build_macos_arm64": {
+        "name": "Build macOS arm64",
+        "runs-on": "macos-14",
+        "needs": "prepare_linux_bridge_runtime",
+        "env": {
+          "ORCA_UPDATER_SIG_KEY": "${{ secrets.ORCA_UPDATER_SIG_KEY }}"
+        },
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "Download linux host runtime artifact",
+            "uses": "actions/download-artifact@v8",
+            "with": {
+              "name": "linux_host_runtime_${{ github.sha }}",
+              "path": "${{ github.workspace }}/linux_host_runtime_artifact"
+            }
+          },
+          {
+            "name": "Extract linux host runtime artifact on macOS arm64",
+            "shell": "bash",
+            "run": "mkdir -p \"$GITHUB_WORKSPACE/tools/pjarczak_bambu_linux_host/runtime\"\ntar -xzf \"$GITHUB_WORKSPACE/linux_host_runtime_artifact/linux_host_runtime_${{ github.sha }}.tar.gz\" -C \"$GITHUB_WORKSPACE/tools/pjarczak_bambu_linux_host/runtime\"\n"
+          },
+          {
+            "name": "Install mac tools",
+            "shell": "bash",
+            "run": "brew install automake texinfo libtool\nbrew list\nmkdir -p \"$GITHUB_WORKSPACE/deps/build/arm64\"\n"
+          },
+          {
+            "name": "Build macOS arm64 deps",
+            "shell": "bash",
+            "run": "./build_release_macos.sh -dx -1 -a arm64 -t 11.3\n"
+          },
+          {
+            "name": "Build macOS arm64 app bundle",
+            "shell": "bash",
+            "run": "./build_release_macos.sh -s -n -x -1 -a arm64 -t 11.3\n"
+          },
+          {
+            "name": "Pack macOS arm64 app bundle",
+            "shell": "bash",
+            "run": "tar -czvf OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}.tar.gz -C build/arm64 OrcaSlicer\n"
+          },
+          {
+            "name": "Upload macOS arm64 app bundle",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}",
+              "path": "${{ github.workspace }}/OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}.tar.gz",
+              "if-no-files-found": "error"
+            }
+          }
+        ]
+      },
+      "build_macos_x86_64": {
+        "name": "Build macOS x86_64",
+        "runs-on": "macos-14",
+        "needs": "prepare_linux_bridge_runtime",
+        "env": {
+          "ORCA_UPDATER_SIG_KEY": "${{ secrets.ORCA_UPDATER_SIG_KEY }}"
+        },
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "Download linux host runtime artifact",
+            "uses": "actions/download-artifact@v8",
+            "with": {
+              "name": "linux_host_runtime_${{ github.sha }}",
+              "path": "${{ github.workspace }}/linux_host_runtime_artifact"
+            }
+          },
+          {
+            "name": "Extract linux host runtime artifact on macOS x86_64",
+            "shell": "bash",
+            "run": "mkdir -p \"$GITHUB_WORKSPACE/tools/pjarczak_bambu_linux_host/runtime\"\ntar -xzf \"$GITHUB_WORKSPACE/linux_host_runtime_artifact/linux_host_runtime_${{ github.sha }}.tar.gz\" -C \"$GITHUB_WORKSPACE/tools/pjarczak_bambu_linux_host/runtime\"\n"
+          },
+          {
+            "name": "Install mac tools",
+            "shell": "bash",
+            "run": "brew install automake texinfo libtool\nbrew list\nmkdir -p \"$GITHUB_WORKSPACE/deps/build/x86_64\"\n"
+          },
+          {
+            "name": "Build macOS x86_64 deps",
+            "shell": "bash",
+            "run": "./build_release_macos.sh -dx -1 -a x86_64 -t 11.3\n"
+          },
+          {
+            "name": "Build macOS x86_64 app bundle",
+            "shell": "bash",
+            "run": "./build_release_macos.sh -s -n -x -1 -a x86_64 -t 11.3\n"
+          },
+          {
+            "name": "Pack macOS x86_64 app bundle",
+            "shell": "bash",
+            "run": "tar -czvf OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}.tar.gz -C build/x86_64 OrcaSlicer\n"
+          },
+          {
+            "name": "Upload macOS x86_64 app bundle",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}",
+              "path": "${{ github.workspace }}/OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}.tar.gz",
+              "if-no-files-found": "error"
+            }
+          }
+        ]
+      },
+      "build_macos_universal": {
+        "name": "Build macOS universal",
+        "runs-on": "macos-14",
+        "needs": [
+          "build_macos_arm64",
+          "build_macos_x86_64"
+        ],
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "Download macOS app bundles",
+            "uses": "actions/download-artifact@v8",
+            "with": {
+              "pattern": "OrcaSlicer_Mac_bundle_*_${{ github.sha }}",
+              "path": "${{ github.workspace }}/mac_bundles"
+            }
+          },
+          {
+            "name": "Extract macOS app bundles",
+            "shell": "bash",
+            "run": "mkdir -p build/arm64 build/x86_64\narm_bundle=$(find \"$GITHUB_WORKSPACE/mac_bundles/OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}\" -name '*.tar.gz' -print -quit)\nx86_bundle=$(find \"$GITHUB_WORKSPACE/mac_bundles/OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}\" -name '*.tar.gz' -print -quit)\ntar -xzvf \"$arm_bundle\" -C \"$GITHUB_WORKSPACE/build/arm64\"\ntar -xzvf \"$x86_bundle\" -C \"$GITHUB_WORKSPACE/build/x86_64\"\n"
+          },
+          {
+            "name": "Build universal mac app bundle",
+            "shell": "bash",
+            "run": "./build_release_macos.sh -u -x -1 -a universal -t 11.3\n"
+          },
+          {
+            "name": "Create DMG without runtime validation",
+            "shell": "bash",
+            "run": "mkdir -p \"$GITHUB_WORKSPACE/build/universal/OrcaSlicer_dmg\"\nrm -rf \"$GITHUB_WORKSPACE/build/universal/OrcaSlicer_dmg\"/*\ncp -R \"$GITHUB_WORKSPACE/build/universal/OrcaSlicer/OrcaSlicer.app\" \"$GITHUB_WORKSPACE/build/universal/OrcaSlicer_dmg/\"\nln -sfn /Applications \"$GITHUB_WORKSPACE/build/universal/OrcaSlicer_dmg/Applications\"\nver=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '\"' -f2)\nhdiutil create -volname \"OrcaSlicer\" -srcfolder \"$GITHUB_WORKSPACE/build/universal/OrcaSlicer_dmg\" -ov -format UDZO \"OrcaSlicer_Mac_universal_V${ver}.dmg\"\n"
+          },
+          {
+            "name": "Explain skipped hosted runtime validation",
+            "shell": "bash",
+            "run": "echo \"Hosted macOS runners do not support nested virtualization, so bundled Lima runtime validation is intentionally skipped here.\"\n"
+          },
+          {
+            "name": "Upload macOS universal DMG",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_Mac_universal_${{ github.sha }}",
+              "path": "${{ github.workspace }}/OrcaSlicer_Mac_universal_V*.dmg",
+              "if-no-files-found": "error"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "build_orca.yml": {
+    "true": {
+      "workflow_call": {
+        "inputs": {
+          "cache-key": {
+            "required": false,
+            "type": "string"
+          },
+          "cache-path": {
+            "required": false,
+            "type": "string"
+          },
+          "os": {
+            "required": true,
+            "type": "string"
+          },
+          "arch": {
+            "required": false,
+            "type": "string"
+          },
+          "macos-combine-only": {
+            "required": false,
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    "jobs": {
+      "build_orca": {
+        "name": "Build OrcaSlicer",
+        "runs-on": "${{ inputs.os }}",
+        "env": {
+          "date": null,
+          "ver": null,
+          "ver_pure": null,
+          "ubuntu-ver": "2404",
+          "ubuntu-ver-str": "_Ubuntu2404",
+          "ORCA_UPDATER_SIG_KEY": "${{ secrets.ORCA_UPDATER_SIG_KEY }}"
+        },
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "name": "load cached deps",
+            "if": "${{ !(runner.os == 'macOS' && inputs.macos-combine-only) }}",
+            "uses": "actions/cache@v5",
+            "with": {
+              "path": "${{ inputs.cache-path }}",
+              "key": "${{ inputs.cache-key }}",
+              "fail-on-cache-miss": true
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "Get the version and date on Ubuntu and macOS",
+            "if": "runner.os != 'Windows'",
+            "run": "ver_pure=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '\"' -f2)\nif [[ \"${{ github.event_name }}\" == \"pull_request\" ]]; then\n  ver=\"PR-${{ github.event.number }}\"\n  git_commit_hash=\"${{ github.event.pull_request.head.sha }}\"\nelse\n  ver=V$ver_pure\n  git_commit_hash=\"\"\nfi\necho \"ver=$ver\" >> $GITHUB_ENV\necho \"ver_pure=$ver_pure\" >> $GITHUB_ENV\necho \"date=$(date +'%Y%m%d')\" >> $GITHUB_ENV\necho \"git_commit_hash=$git_commit_hash\" >> $GITHUB_ENV\n",
+            "shell": "bash"
+          },
+          {
+            "name": "Get the version and date on Windows",
+            "if": "runner.os == 'Windows'",
+            "run": "$date = Get-Date -Format 'yyyyMMdd'\n$ref = \"${{ github.ref }}\"\n$eventName = \"${{ github.event_name }}\"\n$prNumber = \"${{ github.event.number }}\"\n\nif ($eventName -eq 'pull_request') {\n    $ver = \"PR\" + $prNumber\n    $git_commit_hash = \"${{ github.event.pull_request.head.sha }}\"\n} else {\n    $versionContent = Get-Content version.inc -Raw\n    if ($versionContent -match 'set\\(SoftFever_VERSION \"(.*?)\"\\)') {\n        $ver = $matches[1]\n    }\n    $ver = \"V$ver\"\n    $git_commit_hash = \"\"\n}\n\necho \"ver=$ver\" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8\necho \"date=$date\" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8\necho \"git_commit_hash=$git_commit_hash\" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8\necho \"date: ${{ env.date }} version: ${{ env.ver }}\"\n",
+            "shell": "pwsh"
+          },
+          {
+            "name": "Install tools mac",
+            "if": "runner.os == 'macOS' && !inputs.macos-combine-only",
+            "run": "if [ -z \"${{ vars.SELF_HOSTED }}\" ]; then\n  brew install libtool\n  brew list\nfi\nmkdir -p ${{ github.workspace }}/deps/build/${{ inputs.arch }}\n"
+          },
+          {
+            "name": "Free disk space",
+            "if": "runner.os == 'macOS' && !inputs.macos-combine-only && !vars.SELF_HOSTED",
+            "run": "df -hI /dev/disk3s1s1\nsudo find /Applications -maxdepth 1 -type d -name \"Xcode_*.app\" ! -name \"Xcode_15.4.app\" -exec rm -rf {} +\nsudo rm -rf ~/Library/Developer/CoreSimulator/Caches/*\ndf -hI /dev/disk3s1s1\n"
+          },
+          {
+            "name": "Build slicer mac",
+            "if": "runner.os == 'macOS' && !inputs.macos-combine-only",
+            "working-directory": "${{ github.workspace }}",
+            "run": "./build_release_macos.sh -s -n -x ${{ !vars.SELF_HOSTED && '-1' || '' }} -a ${{ inputs.arch }} -t 10.15\n"
+          },
+          {
+            "name": "Pack macOS app bundle ${{ inputs.arch }}",
+            "if": "runner.os == 'macOS' && !inputs.macos-combine-only",
+            "working-directory": "${{ github.workspace }}",
+            "run": "tar -czvf OrcaSlicer_Mac_bundle_${{ inputs.arch }}_${{ github.sha }}.tar.gz -C build/${{ inputs.arch }} OrcaSlicer\n"
+          },
+          {
+            "name": "Upload macOS app bundle ${{ inputs.arch }}",
+            "if": "runner.os == 'macOS' && !inputs.macos-combine-only",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_Mac_bundle_${{ inputs.arch }}_${{ github.sha }}",
+              "path": "${{ github.workspace }}/OrcaSlicer_Mac_bundle_${{ inputs.arch }}_${{ github.sha }}.tar.gz"
+            }
+          },
+          {
+            "name": "Download macOS app bundles",
+            "if": "runner.os == 'macOS' && inputs.macos-combine-only",
+            "uses": "actions/download-artifact@v8",
+            "with": {
+              "pattern": "OrcaSlicer_Mac_bundle_*_${{ github.sha }}",
+              "path": "${{ github.workspace }}/mac_bundles"
+            }
+          },
+          {
+            "name": "Extract macOS app bundles",
+            "if": "runner.os == 'macOS' && inputs.macos-combine-only",
+            "working-directory": "${{ github.workspace }}",
+            "run": "mkdir -p build/arm64 build/x86_64\narm_bundle=$(find \"${{ github.workspace }}/mac_bundles/OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}\" -name '*.tar.gz' -print -quit)\nx86_bundle=$(find \"${{ github.workspace }}/mac_bundles/OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}\" -name '*.tar.gz' -print -quit)\ntar -xzvf \"$arm_bundle\" -C \"${{ github.workspace }}/build/arm64\"\ntar -xzvf \"$x86_bundle\" -C \"${{ github.workspace }}/build/x86_64\"\n"
+          },
+          {
+            "name": "Build universal mac app bundle",
+            "if": "runner.os == 'macOS' && inputs.macos-combine-only",
+            "working-directory": "${{ github.workspace }}",
+            "run": "./build_release_macos.sh -u -x ${{ !vars.SELF_HOSTED && '-1' || '' }} -a universal -t 10.15\n"
+          },
+          {
+            "name": "Delete intermediate per-arch artifacts",
+            "if": "runner.os == 'macOS' && inputs.macos-combine-only",
+            "uses": "geekyeggo/delete-artifact@v6",
+            "with": {
+              "name": "OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}\nOrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}\n"
+            }
+          },
+          {
+            "name": "Sign app and notary",
+            "if": "github.repository == 'OrcaSlicer/OrcaSlicer' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && runner.os == 'macOS' && inputs.macos-combine-only",
+            "working-directory": "${{ github.workspace }}",
+            "env": {
+              "BUILD_CERTIFICATE_BASE64": "${{ secrets.BUILD_CERTIFICATE_BASE64 }}",
+              "P12_PASSWORD": "${{ secrets.P12_PASSWORD }}",
+              "KEYCHAIN_PASSWORD": "${{ secrets.KEYCHAIN_PASSWORD }}",
+              "CERTIFICATE_ID": "${{ secrets.MACOS_CERTIFICATE_ID }}"
+            },
+            "run": "CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12\nKEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db\necho -n \"$BUILD_CERTIFICATE_BASE64\" | base64 --decode --output $CERTIFICATE_PATH\nsecurity create-keychain -p $KEYCHAIN_PASSWORD $KEYCHAIN_PATH\nsecurity set-keychain-settings -lut 21600 $KEYCHAIN_PATH\nsecurity unlock-keychain -p $KEYCHAIN_PASSWORD $KEYCHAIN_PATH\n# Set the temporary keychain as the default to prevent codesign from accessing the locked login keychain\nsecurity default-keychain -s \"$KEYCHAIN_PATH\"\nsecurity import $CERTIFICATE_PATH -P $P12_PASSWORD -A -t cert -f pkcs12 -k $KEYCHAIN_PATH\nsecurity list-keychain -d user -s $KEYCHAIN_PATH\nsecurity set-key-partition-list -S apple-tool:,apple:,codesign: -s -k $P12_PASSWORD $KEYCHAIN_PATH\ncodesign --deep --force --verbose --options runtime --timestamp --entitlements ${{ github.workspace }}/scripts/disable_validation.entitlements --sign \"$CERTIFICATE_ID\" ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer.app\n# Sign OrcaSlicer_profile_validator.app if it exists\nif [ -f \"${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app/Contents/MacOS/OrcaSlicer_profile_validator\" ]; then\n  codesign --deep --force --verbose --options runtime --timestamp --entitlements ${{ github.workspace }}/scripts/disable_validation.entitlements --sign \"$CERTIFICATE_ID\" ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app\nfi\n\n# Create main OrcaSlicer DMG without the profile validator helper\nmkdir -p ${{ github.workspace }}/build/universal/OrcaSlicer_dmg\nrm -rf ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/*\ncp -R ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer.app ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/\nln -sfn /Applications ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/Applications\nhdiutil create -volname \"OrcaSlicer\" -srcfolder ${{ github.workspace }}/build/universal/OrcaSlicer_dmg -ov -format UDZO OrcaSlicer_Mac_universal_${{ env.ver }}.dmg\ncodesign --deep --force --verbose --options runtime --timestamp --entitlements ${{ github.workspace }}/scripts/disable_validation.entitlements --sign \"$CERTIFICATE_ID\" OrcaSlicer_Mac_universal_${{ env.ver }}.dmg\n\n# Create separate OrcaSlicer_profile_validator DMG if the app exists\nif [ -f \"${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app/Contents/MacOS/OrcaSlicer_profile_validator\" ]; then\n  mkdir -p ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg\n  rm -rf ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg/*\n  cp -R ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg/\n  ln -sfn /Applications ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg/Applications\n  hdiutil create -volname \"OrcaSlicer Profile Validator\" -srcfolder ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg -ov -format UDZO OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg\n  codesign --deep --force --verbose --options runtime --timestamp --entitlements ${{ github.workspace }}/scripts/disable_validation.entitlements --sign \"$CERTIFICATE_ID\" OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg\nfi\n\n# Notarize main DMG\nxcrun notarytool submit \"OrcaSlicer_Mac_universal_${{ env.ver }}.dmg\" --apple-id \"${{ secrets.APPLE_DEV_ACCOUNT }}\" --team-id \"${{ secrets.TEAM_ID }}\" --password \"${{ secrets.APP_PWD }}\" --wait\nxcrun stapler staple OrcaSlicer_Mac_universal_${{ env.ver }}.dmg\n\n# Notarize profile validator DMG if it exists\nif [ -f \"OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg\" ]; then\n  xcrun notarytool submit \"OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg\" --apple-id \"${{ secrets.APPLE_DEV_ACCOUNT }}\" --team-id \"${{ secrets.TEAM_ID }}\" --password \"${{ secrets.APP_PWD }}\" --wait\n  xcrun stapler staple OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg\nfi\n"
+          },
+          {
+            "name": "Create DMG without notary",
+            "if": "github.ref != 'refs/heads/main' && runner.os == 'macOS' && inputs.macos-combine-only",
+            "working-directory": "${{ github.workspace }}",
+            "run": "mkdir -p ${{ github.workspace }}/build/universal/OrcaSlicer_dmg\nrm -rf ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/*\ncp -R ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer.app ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/\nln -sfn /Applications ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/Applications\nhdiutil create -volname \"OrcaSlicer\" -srcfolder ${{ github.workspace }}/build/universal/OrcaSlicer_dmg -ov -format UDZO OrcaSlicer_Mac_universal_${{ env.ver }}.dmg\n\n# Create separate OrcaSlicer_profile_validator DMG if the app exists\nif [ -f \"${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app/Contents/MacOS/OrcaSlicer_profile_validator\" ]; then\n  mkdir -p ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg\n  rm -rf ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg/*\n  cp -R ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg/\n  ln -sfn /Applications ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg/Applications\n  hdiutil create -volname \"OrcaSlicer Profile Validator\" -srcfolder ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg -ov -format UDZO OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg\nfi\n"
+          },
+          {
+            "name": "Upload artifacts mac",
+            "if": "runner.os == 'macOS' && inputs.macos-combine-only",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_Mac_universal_${{ env.ver }}",
+              "path": "${{ github.workspace }}/OrcaSlicer_Mac_universal_${{ env.ver }}.dmg"
+            }
+          },
+          {
+            "name": "Upload OrcaSlicer_profile_validator DMG mac",
+            "if": "runner.os == 'macOS' && inputs.macos-combine-only && !vars.SELF_HOSTED",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_profile_validator_Mac_universal_DMG_${{ env.ver }}",
+              "path": "${{ github.workspace }}/OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg",
+              "if-no-files-found": "ignore"
+            }
+          },
+          {
+            "name": "Deploy Mac release",
+            "if": "github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'macOS' && inputs.macos-combine-only && !vars.SELF_HOSTED",
+            "uses": "WebFreak001/deploy-nightly@v3.2.0",
+            "with": {
+              "upload_url": "https://uploads.github.com/repos/OrcaSlicer/OrcaSlicer/releases/137995723/assets{?name,label}",
+              "release_id": 137995723,
+              "asset_path": "${{ github.workspace }}/OrcaSlicer_Mac_universal_${{ env.ver }}.dmg",
+              "asset_name": "OrcaSlicer_Mac_universal_nightly.dmg",
+              "asset_content_type": "application/octet-stream",
+              "max_releases": 1
+            }
+          },
+          {
+            "name": "Deploy Mac OrcaSlicer_profile_validator DMG release",
+            "if": "github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'macOS' && inputs.macos-combine-only && !vars.SELF_HOSTED",
+            "uses": "WebFreak001/deploy-nightly@v3.2.0",
+            "with": {
+              "upload_url": "https://uploads.github.com/repos/OrcaSlicer/OrcaSlicer/releases/137995723/assets{?name,label}",
+              "release_id": 137995723,
+              "asset_path": "${{ github.workspace }}/OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg",
+              "asset_name": "OrcaSlicer_profile_validator_Mac_universal_nightly.dmg",
+              "asset_content_type": "application/octet-stream",
+              "max_releases": 1
+            }
+          },
+          {
+            "name": "setup MSVC",
+            "if": "runner.os == 'Windows'",
+            "uses": "microsoft/setup-msbuild@v3"
+          },
+          {
+            "name": "Install nsis",
+            "if": "runner.os == 'Windows' && !vars.SELF_HOSTED",
+            "run": "dir \"C:/Program Files (x86)/Windows Kits/10/Include\"\nchoco install nsis\n"
+          },
+          {
+            "name": "Build slicer Win",
+            "if": "runner.os == 'Windows'",
+            "working-directory": "${{ github.workspace }}",
+            "env": {
+              "WindowsSdkDir": "C:\\Program Files (x86)\\Windows Kits\\10\\",
+              "WindowsSDKVersion": "10.0.26100.0\\"
+            },
+            "run": ".\\build_release_vs.bat slicer"
+          },
+          {
+            "name": "Create installer Win",
+            "if": "runner.os == 'Windows' && !vars.SELF_HOSTED",
+            "working-directory": "${{ github.workspace }}/build",
+            "run": "cpack -G NSIS\n"
+          },
+          {
+            "name": "Pack app",
+            "if": "runner.os == 'Windows'",
+            "working-directory": "${{ github.workspace }}/build",
+            "shell": "cmd",
+            "run": "\"C:/Program Files/7-Zip/7z.exe\" a -tzip OrcaSlicer_Windows_${{ env.ver }}_portable.zip ${{ github.workspace }}/build/OrcaSlicer"
+          },
+          {
+            "name": "Pack PDB",
+            "if": "runner.os == 'Windows' && !vars.SELF_HOSTED",
+            "working-directory": "${{ github.workspace }}/build/src/Release",
+            "shell": "cmd",
+            "run": "\"C:/Program Files/7-Zip/7z.exe\" a -m0=lzma2 -mx9 Debug_PDB_${{ env.ver }}_for_developers_only.7z  *.pdb"
+          },
+          {
+            "name": "Upload artifacts Win zip",
+            "if": "runner.os == 'Windows'",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_Windows_${{ env.ver }}_portable",
+              "path": "${{ github.workspace }}/build/OrcaSlicer"
+            }
+          },
+          {
+            "name": "Upload artifacts Win installer",
+            "if": "runner.os == 'Windows' && !vars.SELF_HOSTED",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_Windows_${{ env.ver }}",
+              "path": "${{ github.workspace }}/build/OrcaSlicer*.exe"
+            }
+          },
+          {
+            "name": "Upload artifacts Win PDB",
+            "if": "runner.os == 'Windows' && !vars.SELF_HOSTED",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "PDB",
+              "path": "${{ github.workspace }}/build/src/Release/Debug_PDB_${{ env.ver }}_for_developers_only.7z"
+            }
+          },
+          {
+            "name": "Upload OrcaSlicer_profile_validator Win",
+            "if": "runner.os == 'Windows' && !vars.SELF_HOSTED",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_profile_validator_Windows_${{ env.ver }}",
+              "path": "${{ github.workspace }}/build/src/Release/OrcaSlicer_profile_validator.exe"
+            }
+          },
+          {
+            "name": "Deploy Windows release portable",
+            "if": "github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'Windows' && !vars.SELF_HOSTED",
+            "uses": "WebFreak001/deploy-nightly@v3.2.0",
+            "with": {
+              "upload_url": "https://uploads.github.com/repos/OrcaSlicer/OrcaSlicer/releases/137995723/assets{?name,label}",
+              "release_id": 137995723,
+              "asset_path": "${{ github.workspace }}/build/OrcaSlicer_Windows_${{ env.ver }}_portable.zip",
+              "asset_name": "OrcaSlicer_Windows_nightly_portable.zip",
+              "asset_content_type": "application/x-zip-compressed",
+              "max_releases": 1
+            }
+          },
+          {
+            "name": "Deploy Windows release installer",
+            "if": "github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'Windows' && !vars.SELF_HOSTED",
+            "uses": "WebFreak001/deploy-nightly@v3.2.0",
+            "with": {
+              "upload_url": "https://uploads.github.com/repos/OrcaSlicer/OrcaSlicer/releases/137995723/assets{?name,label}",
+              "release_id": 137995723,
+              "asset_path": "${{ github.workspace }}/build/OrcaSlicer_Windows_Installer_${{ env.ver }}.exe",
+              "asset_name": "OrcaSlicer_Windows_Installer_nightly.exe",
+              "asset_content_type": "application/x-msdownload",
+              "max_releases": 1
+            }
+          },
+          {
+            "name": "Deploy Windows OrcaSlicer_profile_validator release",
+            "if": "github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'Windows' && !vars.SELF_HOSTED",
+            "uses": "WebFreak001/deploy-nightly@v3.2.0",
+            "with": {
+              "upload_url": "https://uploads.github.com/repos/OrcaSlicer/OrcaSlicer/releases/137995723/assets{?name,label}",
+              "release_id": 137995723,
+              "asset_path": "${{ github.workspace }}/build/src/Release/OrcaSlicer_profile_validator.exe",
+              "asset_name": "OrcaSlicer_profile_validator_Windows_nightly.exe",
+              "asset_content_type": "application/x-msdownload",
+              "max_releases": 1
+            }
+          },
+          {
+            "name": "Apt-Install Dependencies",
+            "if": "runner.os == 'Linux' && !vars.SELF_HOSTED",
+            "uses": "./.github/actions/apt-install-deps"
+          },
+          {
+            "name": "Build slicer and tests",
+            "if": "runner.os == 'Linux'",
+            "shell": "bash",
+            "run": "./build_linux.sh -istrlL\n./scripts/check_appimage_libs.sh ./build/package ./build/package/bin/orca-slicer\nmv -n ./build/OrcaSlicer_Linux_V${{ env.ver_pure }}.AppImage ./build/OrcaSlicer_Linux_AppImage${{ env.ubuntu-ver-str }}_${{ env.ver }}.AppImage\nchmod +x ./build/OrcaSlicer_Linux_AppImage${{ env.ubuntu-ver-str }}_${{ env.ver }}.AppImage\ntar -cvpf build_tests.tar build/tests\n"
+          },
+          {
+            "name": "Upload Test Artifact",
+            "if": "runner.os == 'Linux'",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "${{ github.sha }}-tests",
+              "overwrite": true,
+              "path": "build_tests.tar",
+              "retention-days": 5,
+              "if-no-files-found": "error"
+            }
+          },
+          {
+            "name": "Build orca_custom_preset_tests",
+            "if": "github.ref == 'refs/heads/main' && runner.os == 'Linux' && !vars.SELF_HOSTED",
+            "working-directory": "${{ github.workspace }}/build/src/Release",
+            "shell": "bash",
+            "run": "./OrcaSlicer_profile_validator -p ${{ github.workspace }}/resources/profiles -g 1\ncd ${{ github.workspace }}/resources/profiles\nzip -r orca_custom_preset_tests.zip user/\n"
+          },
+          {
+            "name": "Upload artifacts Ubuntu",
+            "if": "${{ ! env.ACT && runner.os == 'Linux' }}",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_Linux_ubuntu_${{ env.ubuntu-ver }}_${{ env.ver }}",
+              "path": "./build/OrcaSlicer_Linux_AppImage${{ env.ubuntu-ver-str }}_${{ env.ver }}.AppImage"
+            }
+          },
+          {
+            "name": "Upload OrcaSlicer_profile_validator Ubuntu",
+            "if": "${{ ! env.ACT && runner.os == 'Linux' && !vars.SELF_HOSTED }}",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_profile_validator_Linux_ubuntu_${{ env.ubuntu-ver }}_${{ env.ver }}",
+              "path": "./build/src/Release/OrcaSlicer_profile_validator"
+            }
+          },
+          {
+            "name": "Deploy Ubuntu release",
+            "if": "${{ github.repository == 'OrcaSlicer/OrcaSlicer' && ! env.ACT && github.ref == 'refs/heads/main' && runner.os == 'Linux' && !vars.SELF_HOSTED }}",
+            "uses": "WebFreak001/deploy-nightly@v3.2.0",
+            "with": {
+              "upload_url": "https://uploads.github.com/repos/OrcaSlicer/OrcaSlicer/releases/137995723/assets{?name,label}",
+              "release_id": 137995723,
+              "asset_path": "./build/OrcaSlicer_Linux_AppImage${{ env.ubuntu-ver-str }}_${{ env.ver }}.AppImage",
+              "asset_name": "OrcaSlicer_Linux_AppImage${{ env.ubuntu-ver-str }}_nightly.AppImage",
+              "asset_content_type": "application/octet-stream",
+              "max_releases": 1
+            }
+          },
+          {
+            "name": "Deploy Ubuntu release",
+            "if": "${{ github.repository == 'OrcaSlicer/OrcaSlicer' && ! env.ACT && github.ref == 'refs/heads/main' && runner.os == 'Linux' && !vars.SELF_HOSTED }}",
+            "uses": "rickstaa/action-create-tag@v1",
+            "with": {
+              "tag": "nightly-builds",
+              "tag_exists_error": false,
+              "force_push_tag": true,
+              "message": "nightly-builds"
+            }
+          },
+          {
+            "name": "Deploy Ubuntu OrcaSlicer_profile_validator release",
+            "if": "${{ github.repository == 'OrcaSlicer/OrcaSlicer' && ! env.ACT && github.ref == 'refs/heads/main' && runner.os == 'Linux' && !vars.SELF_HOSTED }}",
+            "uses": "WebFreak001/deploy-nightly@v3.2.0",
+            "with": {
+              "upload_url": "https://uploads.github.com/repos/OrcaSlicer/OrcaSlicer/releases/137995723/assets{?name,label}",
+              "release_id": 137995723,
+              "asset_path": "./build/src/Release/OrcaSlicer_profile_validator",
+              "asset_name": "OrcaSlicer_profile_validator_Linux${{ env.ubuntu-ver-str }}_nightly",
+              "asset_content_type": "application/octet-stream",
+              "max_releases": 1
+            }
+          },
+          {
+            "name": "Deploy orca_custom_preset_tests",
+            "if": "${{ github.repository == 'OrcaSlicer/OrcaSlicer' && ! env.ACT && github.ref == 'refs/heads/main' && runner.os == 'Linux' && !vars.SELF_HOSTED }}",
+            "uses": "WebFreak001/deploy-nightly@v3.2.0",
+            "with": {
+              "upload_url": "https://uploads.github.com/repos/OrcaSlicer/OrcaSlicer/releases/137995723/assets{?name,label}",
+              "release_id": 137995723,
+              "asset_path": "${{ github.workspace }}/resources/profiles/orca_custom_preset_tests.zip",
+              "asset_name": "orca_custom_preset_tests.zip",
+              "asset_content_type": "application/octet-stream",
+              "max_releases": 1
+            }
+          }
+        ]
+      }
+    }
+  },
+  "build_rpm_fedora.yml": {
+    "name": "Build RPM (Fedora)",
+    "true": {
+      "workflow_call": null,
+      "workflow_dispatch": null
+    },
+    "concurrency": {
+      "group": "build-rpm-fedora-${{ github.ref }}",
+      "cancel-in-progress": true
+    },
+    "jobs": {
+      "rpm_fedora41": {
+        "name": "RPM (fedora-41)",
+        "runs-on": "ubuntu-24.04",
+        "container": {
+          "image": "fedora:41"
+        },
+        "timeout-minutes": 360,
+        "defaults": {
+          "run": {
+            "shell": "bash"
+          }
+        },
+        "env": {
+          "DIST_ID": "fedora41",
+          "EVENT_TAG": "${{ github.event.release.tag_name }}"
+        },
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "name": "Install system tools",
+            "run": "set -euo pipefail\ndnf install -y \\\n  sudo \\\n  bash \\\n  ca-certificates \\\n  cmake \\\n  ccache \\\n  curl \\\n  file \\\n  findutils \\\n  git \\\n  gzip \\\n  ninja-build \\\n  rpm-build \\\n  tar \\\n  which\n"
+          },
+          {
+            "name": "Compute version",
+            "run": "set -euo pipefail\ntag=\"${EVENT_TAG:-${GITHUB_REF_NAME:-}}\"\nif [[ \"$tag\" == v* ]]; then\n  ver=\"${tag#v}\"\nelse\n  ver=\"git${GITHUB_SHA::7}\"\nfi\nrpm_ver=\"$(printf '%s' \"$ver\" | tr -c 'A-Za-z0-9._' '_')\"\necho \"VER=$ver\" >> \"$GITHUB_ENV\"\necho \"RPM_VER=$rpm_ver\" >> \"$GITHUB_ENV\"\n"
+          },
+          {
+            "name": "Fedora - install Orca build dependencies",
+            "run": "set -euo pipefail\n./build_linux.sh -u\n"
+          },
+          {
+            "name": "Fedora - build Orca dependencies",
+            "run": "set -euo pipefail\n./build_linux.sh -drlL\n"
+          },
+          {
+            "name": "Fedora - build + install",
+            "run": "set -euo pipefail\nrm -rf build install-dir out\nmkdir -p out\n\ncmake -S . -B build -G \"Ninja Multi-Config\" \\\n  -DCMAKE_PREFIX_PATH=\"${PWD}/deps/build/OrcaSlicer_dep/usr/local\" \\\n  -DSLIC3R_STATIC=1 \\\n  -DSLIC3R_GTK=3 \\\n  -DBBL_RELEASE_TO_PUBLIC=1 \\\n  -DBBL_INTERNAL_TESTING=0 \\\n  -DSLIC3R_PCH=ON \\\n  -DORCA_TOOLS=ON \\\n  -DCMAKE_INSTALL_PREFIX=\"${PWD}/install-dir\"\n\ncmake --build build --config Release --target install -j\"$(nproc)\"\n\n./scripts/run_gettext.sh\nmkdir -p install-dir/resources/i18n\ncp -a resources/i18n/. install-dir/resources/i18n/\n\napp_bin=\"\"\nfor candidate in \\\n  \"install-dir/bin/OrcaSlicer\" \\\n  \"install-dir/bin/orca-slicer\" \\\n  \"install-dir/OrcaSlicer\" \\\n  \"install-dir/orca-slicer\"; do\n  if [ -x \"$candidate\" ]; then\n    app_bin=\"${candidate#install-dir/}\"\n    break\n  fi\ndone\n\nif [ -z \"$app_bin\" ]; then\n  echo \"ERROR: installed OrcaSlicer binary not found\"\n  find install-dir -maxdepth 3 -type f | sort\n  exit 1\nfi\n\necho \"APP_BIN=$app_bin\" >> \"$GITHUB_ENV\"\n"
+          },
+          {
+            "name": "Fedora - build RPM",
+            "run": "set -euo pipefail\nrm -rf rpm\nmkdir -p rpm/BUILD rpm/BUILDROOT rpm/RPMS rpm/SOURCES rpm/SPECS rpm/SRPMS\ncp -a install-dir rpm/SOURCES/orcaslicer-root\n\ncat > rpm/SPECS/orcaslicer-bmcu.spec <<SPEC\n%global debug_package %{nil}\nName:           orcaslicer-bmcu\nVersion:        ${RPM_VER}\nRelease:        1%{?dist}\nSummary:        OrcaSlicer BMCU build\nLicense:        AGPL-3.0\nURL:            https://github.com/OrcaSlicer/OrcaSlicer\nBuildArch:      x86_64\n\n%description\nOrcaSlicer BMCU build installed in /opt/orcaslicer.\n\n%install\nrm -rf %{buildroot}\nmkdir -p %{buildroot}/opt/orcaslicer %{buildroot}/usr/bin\ncp -a %{_topdir}/SOURCES/orcaslicer-root/. %{buildroot}/opt/orcaslicer/\ncat > %{buildroot}/usr/bin/orca-slicer-bmcu <<'WRAPPER'\n#!/bin/sh\nexec /opt/orcaslicer/${APP_BIN} \"$@\"\nWRAPPER\nchmod 0755 %{buildroot}/usr/bin/orca-slicer-bmcu\n\n%files\n/opt/orcaslicer\n/usr/bin/orca-slicer-bmcu\n\n%changelog\n* Wed Apr 22 2026 PJARCZAK CI <ci@invalid> - ${RPM_VER}-1\n- Automated build\nSPEC\n\nrpmbuild --define \"_topdir ${PWD}/rpm\" -bb rpm/SPECS/orcaslicer-bmcu.spec\ncp rpm/RPMS/x86_64/*.rpm \"out/OrcaSlicer-BMCU_${DIST_ID}_x86_64_${VER}.rpm\"\n"
+          },
+          {
+            "name": "Fedora - checksums",
+            "run": "set -euo pipefail\n(cd out && sha256sum * > \"SHA256SUMS_${DIST_ID}.txt\")\n"
+          },
+          {
+            "name": "Upload artifacts (RPM Fedora)",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "orcaslicer-bmcu-rpm-${{ env.DIST_ID }}-${{ github.sha }}",
+              "path": "out/",
+              "if-no-files-found": "error"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "build_windows_bridge.yml": {
+    "name": "Build Windows with Linux bridge runtime",
+    "true": {
+      "workflow_call": null,
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "prepare_linux_bridge_runtime": {
+        "name": "Prepare Linux bridge runtime",
+        "runs-on": "ubuntu-24.04",
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "Apt-Install Dependencies",
+            "uses": "./.github/actions/apt-install-deps"
+          },
+          {
+            "name": "Build Linux deps",
+            "shell": "bash",
+            "run": "set -euo pipefail\nfor attempt in 1 2 3; do\n  echo \"Build Linux deps attempt $attempt\"\n  if ./build_linux.sh -drlL; then\n    exit 0\n  fi\n  if [ \"$attempt\" -lt 3 ]; then\n    echo \"Transient dependency download/build failure, retrying after backoff\"\n    sleep $((attempt * 20))\n  fi\ndone\nexit 1\n"
+          },
+          {
+            "name": "Configure linux bridge host build",
+            "shell": "bash",
+            "run": "cmake -S . -B build -G \"Ninja Multi-Config\" -DORCA_TOOLS=ON\n"
+          },
+          {
+            "name": "Build linux host runtime and WSL rootfs",
+            "shell": "bash",
+            "run": "cmake --build build --config Release --target pjarczak_bambu_linux_host\nbash tools/pjarczak_bambu_linux_host/package_linux_host_runtime.sh build\nbash tools/pjarczak_bambu_runtime/rootfs/build_windows_wsl_rootfs.sh tools/pjarczak_bambu_runtime/rootfs/windows-wsl2-rootfs.tar\ntar -czvf linux_host_runtime_${{ github.sha }}.tar.gz -C tools/pjarczak_bambu_linux_host/runtime linux-x86_64\ntar -czvf wsl_rootfs_${{ github.sha }}.tar.gz -C tools/pjarczak_bambu_runtime/rootfs windows-wsl2-rootfs.tar\n"
+          },
+          {
+            "name": "Show packaged linux bridge runtime files",
+            "shell": "bash",
+            "run": "find tools/pjarczak_bambu_linux_host/runtime/linux-x86_64 -maxdepth 1 -type f | sort\n"
+          },
+          {
+            "name": "Upload linux host runtime artifact",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "linux_host_runtime_${{ github.sha }}",
+              "path": "./linux_host_runtime_${{ github.sha }}.tar.gz",
+              "if-no-files-found": "error"
+            }
+          },
+          {
+            "name": "Upload WSL rootfs artifact",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "wsl_rootfs_${{ github.sha }}",
+              "path": "./wsl_rootfs_${{ github.sha }}.tar.gz",
+              "if-no-files-found": "error"
+            }
+          }
+        ]
+      },
+      "build_windows": {
+        "name": "Build Windows",
+        "runs-on": "windows-latest",
+        "needs": "prepare_linux_bridge_runtime",
+        "env": {
+          "ORCA_UPDATER_SIG_KEY": "${{ secrets.ORCA_UPDATER_SIG_KEY }}"
+        },
+        "steps": [
+          {
+            "name": "Checkout",
+            "uses": "actions/checkout@v6",
+            "with": {
+              "lfs": "false"
+            }
+          },
+          {
+            "uses": "lukka/get-cmake@latest",
+            "with": {
+              "cmakeVersion": "~4.3.0",
+              "useLocalCache": true,
+              "useCloudCache": true
+            }
+          },
+          {
+            "name": "Get the version and date on Windows",
+            "shell": "pwsh",
+            "run": "$date = Get-Date -Format 'yyyyMMdd'\n$eventName = \"${{ github.event_name }}\"\n$prNumber = \"${{ github.event.number }}\"\n\nif ($eventName -eq 'pull_request') {\n    $ver = \"PR\" + $prNumber\n} else {\n    $versionContent = Get-Content version.inc -Raw\n    if ($versionContent -match 'set\\(SoftFever_VERSION \"(.*?)\"\\)') {\n        $ver = $matches[1]\n    }\n    $ver = \"V$ver\"\n}\n\necho \"ver=$ver\" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8\necho \"date=$date\" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8\n"
+          },
+          {
+            "name": "Download linux host runtime artifact",
+            "uses": "actions/download-artifact@v8",
+            "with": {
+              "name": "linux_host_runtime_${{ github.sha }}",
+              "path": "${{ github.workspace }}/linux_host_runtime_artifact"
+            }
+          },
+          {
+            "name": "Extract linux host runtime artifact on Windows",
+            "working-directory": "${{ github.workspace }}",
+            "shell": "pwsh",
+            "run": "New-Item -ItemType Directory -Force -Path \"$env:GITHUB_WORKSPACE\\tools\\pjarczak_bambu_linux_host\\runtime\" | Out-Null\ntar -xzf \"$env:GITHUB_WORKSPACE\\linux_host_runtime_artifact\\linux_host_runtime_${{ github.sha }}.tar.gz\" -C \"$env:GITHUB_WORKSPACE\\tools\\pjarczak_bambu_linux_host\\runtime\"\n"
+          },
+          {
+            "name": "Download WSL rootfs artifact",
+            "uses": "actions/download-artifact@v8",
+            "with": {
+              "name": "wsl_rootfs_${{ github.sha }}",
+              "path": "${{ github.workspace }}/wsl_rootfs_artifact"
+            }
+          },
+          {
+            "name": "Extract WSL rootfs artifact on Windows",
+            "working-directory": "${{ github.workspace }}",
+            "shell": "pwsh",
+            "run": "New-Item -ItemType Directory -Force -Path \"$env:GITHUB_WORKSPACE\\tools\\pjarczak_bambu_runtime\\rootfs\" | Out-Null\ntar -xzf \"$env:GITHUB_WORKSPACE\\wsl_rootfs_artifact\\wsl_rootfs_${{ github.sha }}.tar.gz\" -C \"$env:GITHUB_WORKSPACE\\tools\\pjarczak_bambu_runtime\\rootfs\"\n"
+          },
+          {
+            "name": "setup MSVC",
+            "uses": "microsoft/setup-msbuild@v2"
+          },
+          {
+            "name": "Install nsis",
+            "shell": "pwsh",
+            "run": "choco install nsis -y\n"
+          },
+          {
+            "name": "Build Windows deps",
+            "working-directory": "${{ github.workspace }}",
+            "env": {
+              "WindowsSdkDir": "C:\\Program Files (x86)\\Windows Kits\\10\\",
+              "WindowsSDKVersion": "10.0.26100.0\\"
+            },
+            "shell": "pwsh",
+            "run": ".\\build_release_vs.bat deps"
+          },
+          {
+            "name": "Build slicer Win",
+            "working-directory": "${{ github.workspace }}",
+            "env": {
+              "WindowsSdkDir": "C:\\Program Files (x86)\\Windows Kits\\10\\",
+              "WindowsSDKVersion": "10.0.26100.0\\"
+            },
+            "shell": "pwsh",
+            "run": ".\\build_release_vs.bat slicer"
+          },
+          {
+            "name": "Ensure WSL is available for runtime validation",
+            "shell": "pwsh",
+            "run": "$wsl = Join-Path $env:WINDIR 'System32\\wsl.exe'\nif (!(Test-Path $wsl)) { throw 'wsl.exe not found' }\n\n$ready = $false\ntry {\n  & $wsl --status\n  if ($LASTEXITCODE -eq 0) { $ready = $true }\n} catch {}\n\nif (-not $ready) {\n  & $wsl --install --no-distribution\n  if ($LASTEXITCODE -ne 0) { throw 'wsl --install --no-distribution failed' }\n}\n\n& $wsl --update\nif ($LASTEXITCODE -ne 0) { throw 'wsl --update failed' }\n\n& $wsl --status\nif ($LASTEXITCODE -ne 0) { throw 'WSL is still not ready after install/update' }\n"
+          },
+          {
+            "name": "Show packaged Orca runtime files",
+            "shell": "pwsh",
+            "run": "Get-ChildItem -Force \"$env:GITHUB_WORKSPACE\\build\\OrcaSlicer\" | Format-Table Name, Length -AutoSize\n"
+          },
+          {
+            "name": "Install bundled WSL2 Orca runtime into live plugins dir",
+            "shell": "pwsh",
+            "run": "& \"$env:GITHUB_WORKSPACE\\build\\OrcaSlicer\\install_runtime.ps1\" -ReplaceExisting\n"
+          },
+          {
+            "name": "Show live Orca plugin dir after installer",
+            "shell": "pwsh",
+            "run": "Get-ChildItem -Force \"$env:APPDATA\\OrcaSlicer\\plugins\" | Format-Table Name, Length -AutoSize\nWrite-Host \"--- cache dir ---\"\nif (Test-Path \"$env:APPDATA\\OrcaSlicer\\ota\\plugins\") {\n  Get-ChildItem -Force \"$env:APPDATA\\OrcaSlicer\\ota\\plugins\" | Format-Table Name, Length -AutoSize\n}\n"
+          },
+          {
+            "name": "Validate live Orca plugin dir bootstrap package",
+            "shell": "pwsh",
+            "run": "& \"$env:APPDATA\\OrcaSlicer\\plugins\\verify_runtime.ps1\" -PackageDir \"$env:APPDATA\\OrcaSlicer\\plugins\" -PluginCacheDir \"$env:APPDATA\\OrcaSlicer\\ota\\plugins\" -AllowMissingLinuxPlugin\n"
+          },
+          {
+            "name": "Create installer Win",
+            "working-directory": "${{ github.workspace }}/build",
+            "shell": "pwsh",
+            "run": "cpack -G NSIS\n"
+          },
+          {
+            "name": "Pack app",
+            "working-directory": "${{ github.workspace }}/build",
+            "shell": "cmd",
+            "run": "\"C:/Program Files/7-Zip/7z.exe\" a -tzip OrcaSlicer_Windows_${{ env.ver }}_portable.zip ${{ github.workspace }}/build/OrcaSlicer"
+          },
+          {
+            "name": "Upload artifacts Win portable",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_Windows_${{ env.ver }}_portable",
+              "path": "${{ github.workspace }}/build/OrcaSlicer_Windows_${{ env.ver }}_portable.zip",
+              "if-no-files-found": "error"
+            }
+          },
+          {
+            "name": "Upload artifacts Win installer",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "OrcaSlicer_Windows_${{ env.ver }}_installer",
+              "path": "${{ github.workspace }}/build/OrcaSlicer*.exe",
+              "if-no-files-found": "error"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "check_locale.yml": {
+    "name": "Check locale",
+    "true": {
+      "pull_request": {
+        "branches": [
+          "main"
+        ],
+        "paths": [
+          "localization/**",
+          ".github/workflows/check_locale.yml"
+        ]
+      }
+    },
+    "jobs": {
+      "check_translation": {
+        "name": "Check translation",
+        "runs-on": "ubuntu-latest",
+        "steps": [
+          {
+            "name": "Checkout repository",
+            "uses": "actions/checkout@v6"
+          },
+          {
+            "name": "Install gettext",
+            "run": "sudo apt-get update\nsudo apt-get install -y gettext\n"
+          },
+          {
+            "name": "Check translation format",
+            "run": "echo $PWD\npot_file=\"./localization/i18n/OrcaSlicer.pot\"\nfor dir in ./localization/i18n/*/\ndo\n    dir=${dir%*/}      # remove the trailing \"/\"\n    lang=${dir##*/}    # extract the language identifier\n\n    if [ -f \"$dir/OrcaSlicer_${lang}.po\" ]; then\n        mkdir -p ./resources/i18n/${lang}/\n        msgfmt --check-format -o ./resources/i18n/${lang}/OrcaSlicer.mo $dir/OrcaSlicer_${lang}.po\n        # Check the exit status of the msgfmt command\n        if [ $? -ne 0 ]; then\n            echo \"Error encountered with msgfmt command for language ${lang}.\"\n            exit 1  # Exit the script with an error status\n        fi\n    fi\ndone\n"
+          }
+        ]
+      }
+    }
+  },
+  "check_profiles.yml": {
+    "name": "Check profiles",
+    "true": {
+      "pull_request": {
+        "branches": [
+          "main"
+        ],
+        "paths": [
+          "resources/profiles/**",
+          ".github/workflows/check_profiles.yml"
+        ]
+      },
+      "workflow_dispatch": {
+        "inputs": {
+          "logLevel": {
+            "description": "Log level",
+            "required": true,
+            "default": "warning"
+          }
+        }
+      }
+    },
+    "permissions": {
+      "contents": "read"
+    },
+    "jobs": {
+      "check_profiles": {
+        "name": "Check profiles",
+        "runs-on": "ubuntu-24.04",
+        "steps": [
+          {
+            "name": "Checkout repository",
+            "uses": "actions/checkout@v6"
+          },
+          {
+            "name": "Run extra JSON check",
+            "id": "extra_json_check",
+            "continue-on-error": true,
+            "run": "set +e\npython3 ./scripts/orca_extra_profile_check.py 2>&1 | tee ${{ runner.temp }}/extra_json_check.log\nexit ${PIPESTATUS[0]}\n"
+          },
+          {
+            "name": "Download",
+            "working-directory": "${{ github.workspace }}",
+            "run": "curl -LJO https://github.com/SoftFever/Orca_tools/releases/download/1/OrcaSlicer_profile_validator\nchmod +x ./OrcaSlicer_profile_validator\n"
+          },
+          {
+            "name": "validate system profiles",
+            "id": "validate_system",
+            "continue-on-error": true,
+            "run": "set +e\n./OrcaSlicer_profile_validator -p ${{ github.workspace }}/resources/profiles -l 2 2>&1 | tee ${{ runner.temp }}/validate_system.log\nexit ${PIPESTATUS[0]}\n"
+          },
+          {
+            "name": "validate custom presets",
+            "id": "validate_custom",
+            "continue-on-error": true,
+            "working-directory": "${{ github.workspace }}",
+            "run": "set +e\ncurl -LJO https://github.com/OrcaSlicer/OrcaSlicer/releases/download/nightly-builds/orca_custom_preset_tests.zip\nunzip -q ./orca_custom_preset_tests.zip -d ${{ github.workspace }}/resources/profiles\n./OrcaSlicer_profile_validator -p ${{ github.workspace }}/resources/profiles -l 2 2>&1 | tee ${{ runner.temp }}/validate_custom.log\nexit ${PIPESTATUS[0]}\n"
+          },
+          {
+            "name": "Prepare comment artifact",
+            "if": "${{ always() && github.event_name == 'pull_request' && (steps.extra_json_check.outcome == 'failure' || steps.validate_system.outcome == 'failure' || steps.validate_custom.outcome == 'failure') }}",
+            "run": "mkdir -p ${{ runner.temp }}/profile-check-results\n\n{\n  echo \"## :x: Profile Validation Errors\"\n  echo \"\"\n\n  if [ \"${{ steps.extra_json_check.outcome }}\" = \"failure\" ]; then\n    echo \"### Extra JSON Check Failed\"\n    echo \"\"\n    echo '```'\n    head -c 30000 ${{ runner.temp }}/extra_json_check.log || echo \"No output captured\"\n    echo '```'\n    echo \"\"\n  fi\n\n  if [ \"${{ steps.validate_system.outcome }}\" = \"failure\" ]; then\n    echo \"### System Profile Validation Failed\"\n    echo \"\"\n    echo '```'\n    head -c 30000 ${{ runner.temp }}/validate_system.log || echo \"No output captured\"\n    echo '```'\n    echo \"\"\n  fi\n\n  if [ \"${{ steps.validate_custom.outcome }}\" = \"failure\" ]; then\n    echo \"### Custom Preset Validation Failed\"\n    echo \"\"\n    echo '```'\n    head -c 30000 ${{ runner.temp }}/validate_custom.log || echo \"No output captured\"\n    echo '```'\n    echo \"\"\n  fi\n\n  echo \"---\"\n  echo \"*Please fix the above errors and push a new commit.*\"\n} > ${{ runner.temp }}/profile-check-results/pr_comment.md\n\necho \"${{ github.event.pull_request.number }}\" > ${{ runner.temp }}/profile-check-results/pr_number.txt\n"
+          },
+          {
+            "name": "Upload comment artifact",
+            "if": "${{ always() && github.event_name == 'pull_request' && (steps.extra_json_check.outcome == 'failure' || steps.validate_system.outcome == 'failure' || steps.validate_custom.outcome == 'failure') }}",
+            "uses": "actions/upload-artifact@v7",
+            "with": {
+              "name": "profile-check-results",
+              "path": "${{ runner.temp }}/profile-check-results/",
+              "retention-days": 1
+            }
+          },
+          {
+            "name": "Fail if any check failed",
+            "if": "${{ always() && (steps.extra_json_check.outcome == 'failure' || steps.validate_system.outcome == 'failure' || steps.validate_custom.outcome == 'failure') }}",
+            "run": "echo \"One or more profile checks failed. See above for details.\"\nexit 1\n"
+          }
+        ]
+      }
+    }
+  },
+  "check_profiles_comment.yml": {
+    "name": "Post profile check comment",
+    "true": {
+      "workflow_run": {
+        "workflows": [
+          "Check profiles"
+        ],
+        "types": [
+          "completed"
+        ]
+      }
+    },
+    "permissions": {
+      "pull-requests": "write"
+    },
+    "jobs": {
+      "post_comment": {
+        "name": "Post PR comment",
+        "runs-on": "ubuntu-24.04",
+        "if": "${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'failure' }}",
+        "steps": [
+          {
+            "name": "Download artifact",
+            "id": "download",
+            "uses": "actions/download-artifact@v8",
+            "continue-on-error": true,
+            "with": {
+              "name": "profile-check-results",
+              "run-id": "${{ github.event.workflow_run.id }}",
+              "github-token": "${{ github.token }}"
+            }
+          },
+          {
+            "name": "Post comment on PR",
+            "if": "${{ steps.download.outcome == 'success' }}",
+            "env": {
+              "GH_TOKEN": "${{ github.token }}",
+              "GH_REPO": "${{ github.repository }}"
+            },
+            "run": "if [ ! -f pr_number.txt ] || [ ! -f pr_comment.md ]; then\n  echo \"No comment artifact found, skipping.\"\n  exit 0\nfi\n\nPR_NUMBER=$(cat pr_number.txt)\nif ! [[ \"$PR_NUMBER\" =~ ^[0-9]+$ ]]; then\n  echo \"Invalid PR number: $PR_NUMBER\"\n  exit 1\nfi\n\ngh pr comment \"$PR_NUMBER\" --body-file pr_comment.md\n"
+          }
+        ]
+      }
+    }
+  },
+  "dedupe-issues.yml": {
+    "name": "Orca Issue Dedupe",
+    "description": "Automatically dedupe GitHub issues using AI",
+    "true": {
+      "issues": {
+        "types": [
+          "opened"
+        ]
+      },
+      "workflow_dispatch": {
+        "inputs": {
+          "issue_number": {
+            "description": "Issue number to process for duplicate detection",
+            "required": true,
+            "type": "string"
+          }
+        }
+      }
+    },
+    "jobs": {
+      "dedupe-issues": {
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 30,
+        "permissions": {
+          "contents": "read",
+          "issues": "write"
+        },
+        "steps": [
+          {
+            "name": "Checkout repository",
+            "uses": "actions/checkout@v6"
+          },
+          {
+            "name": "Run Claude Code slash command",
+            "uses": "anthropics/claude-code-base-action@beta",
+            "with": {
+              "prompt": "/dedupe ${{ github.repository }}/issues/${{ github.event.issue.number || inputs.issue_number }}",
+              "claude_code_oauth_token": "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}",
+              "claude_args": "--model claude-sonnet-4-5-20250929",
+              "claude_env": "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n"
+            }
+          },
+          {
+            "name": "Log duplicate comment event to Statsig",
+            "if": "always()",
+            "env": {
+              "STATSIG_API_KEY": "${{ secrets.STATSIG_API_KEY }}"
+            },
+            "run": "ISSUE_NUMBER=${{ github.event.issue.number || inputs.issue_number }}\nREPO=${{ github.repository }}\n\nif [ -z \"$STATSIG_API_KEY\" ]; then\n  echo \"STATSIG_API_KEY not found, skipping Statsig logging\"\n  exit 0\nfi\n\n# Prepare the event payload\nEVENT_PAYLOAD=$(jq -n \\\n  --arg issue_number \"$ISSUE_NUMBER\" \\\n  --arg repo \"$REPO\" \\\n  --arg triggered_by \"${{ github.event_name }}\" \\\n  '{\n    events: [{\n      eventName: \"github_duplicate_comment_added\",\n      value: 1,\n      metadata: {\n        repository: $repo,\n        issue_number: ($issue_number | tonumber),\n        triggered_by: $triggered_by,\n        workflow_run_id: \"${{ github.run_id }}\"\n      },\n      time: (now | floor | tostring)\n    }]\n  }')\n\n# Send to Statsig API\necho \"Logging duplicate comment event to Statsig for issue #${ISSUE_NUMBER}\"\n\nRESPONSE=$(curl -s -w \"\\n%{http_code}\" -X POST https://events.statsigapi.net/v1/log_event \\\n  -H \"Content-Type: application/json\" \\\n  -H \"STATSIG-API-KEY: ${STATSIG_API_KEY}\" \\\n  -d \"$EVENT_PAYLOAD\")\n\nHTTP_CODE=$(echo \"$RESPONSE\" | tail -n1)\nBODY=$(echo \"$RESPONSE\" | head -n-1)\n\nif [ \"$HTTP_CODE\" -eq 200 ] || [ \"$HTTP_CODE\" -eq 202 ]; then\n  echo \"Successfully logged duplicate comment event for issue #${ISSUE_NUMBER}\"\nelse\n  echo \"Failed to log duplicate comment event for issue #${ISSUE_NUMBER}. HTTP ${HTTP_CODE}: ${BODY}\"\nfi\n"
+          }
+        ]
+      }
+    }
+  },
+  "doxygen-docs.yml": {
+    "name": "Generate Doxygen Documentation",
+    "true": {
+      "schedule": [
+        {
+          "cron": "0 0 * * 1"
+        }
+      ],
+      "workflow_dispatch": null
+    },
+    "concurrency": {
+      "group": "${{ github.workflow }}",
+      "cancel-in-progress": true
+    },
+    "jobs": {
+      "build-and-deploy": {
+        "name": "Build and Deploy Docs",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 60,
+        "if": "github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main'",
+        "permissions": {
+          "contents": "read"
+        },
+        "steps": [
+          {
+            "uses": "thejerrybao/setup-swap-space@v1",
+            "with": {
+              "swap-space-path": "/swapfile",
+              "swap-size-gb": 8,
+              "remove-existing-swap-files": true
+            }
+          },
+          {
+            "name": "Checkout repository",
+            "uses": "actions/checkout@v6"
+          },
+          {
+            "name": "Install Doxygen and Graphviz",
+            "run": "set -euo pipefail\nsudo apt-get update\nsudo apt-get install -y doxygen graphviz\n"
+          },
+          {
+            "name": "Generate documentation",
+            "run": "set -euo pipefail\n# Override DOT_NUM_THREADS to avoid parallel dot race condition bug\nsed -i 's/^DOT_NUM_THREADS.*/DOT_NUM_THREADS = 1/' .doxygen\ndoxygen .doxygen\n# Verify documentation was generated\nif [ ! -f \"internal_docs/index.html\" ]; then\n  echo \"Error: Documentation generation failed - index.html not found\"\n  exit 1\nfi\n"
+          },
+          {
+            "name": "Install Rclone",
+            "run": "set -euo pipefail\nsudo -v\ncurl -fsSL https://rclone.org/install.sh | sudo bash\n"
+          },
+          {
+            "name": "optimize",
+            "run": "set -euo pipefail\nrm -f internal_docs/Nodes.xml internal_docs/Tokens.xml\nfind internal_docs -name \"*.map\" -type f -delete || true\nfind internal_docs -name \"*.md5\" -type f -delete || true\n"
+          },
+          {
+            "name": "upload",
+            "run": "set -euo pipefail\n# Remove existing config if it exists to avoid conflicts\nrclone config delete cloudflare 2>/dev/null || true\nrclone config create cloudflare s3 \\\nprovider Cloudflare \\\naccess_key_id ${{ secrets.R2_ACCESS_KEY_ID }} \\\nsecret_access_key ${{ secrets.R2_SECRET_ACCESS_KEY }} \\\nendpoint ${{ secrets.R2_ENDPOINT }}\n\nrclone sync internal_docs/ cloudflare:orcaslicer-internals \\\n--progress \\\n--transfers 512 \\\n--checkers 512 \n\necho \"Documentation upload completed successfully\""
+          }
+        ]
+      }
+    }
+  },
+  "my_build_all.yml": {
+    "name": "My Build All",
+    "true": {
+      "workflow_dispatch": null,
+      "push": {
+        "tags": [
+          "v*"
+        ]
+      },
+      "release": {
+        "types": [
+          "published"
+        ]
+      }
+    },
+    "permissions": {
+      "contents": "write"
+    },
+    "concurrency": {
+      "group": "my-build-all-${{ github.event.release.tag_name || github.ref }}",
+      "cancel-in-progress": true
+    },
+    "jobs": {
+      "build_windows": {
+        "uses": "./.github/workflows/build_windows_bridge.yml",
+        "secrets": "inherit"
+      },
+      "build_linux_portable": {
+        "uses": "./.github/workflows/build_linux_portable.yml",
+        "secrets": "inherit"
+      },
+      "build_linux_appimage": {
+        "uses": "./.github/workflows/build_linux_appimage.yml",
+        "secrets": "inherit"
+      },
+      "build_macos": {
+        "uses": "./.github/workflows/build_macos_bridge.yml",
+        "secrets": "inherit"
+      },
+      "publish_release": {
+        "name": "Publish release assets",
+        "needs": [
+          "build_windows",
+          "build_linux_portable",
+          "build_linux_appimage",
+          "build_macos"
+        ],
+        "if": "${{ github.event_name == 'push' || github.event_name == 'release' }}",
+        "runs-on": "ubuntu-24.04",
+        "permissions": {
+          "contents": "write"
+        },
+        "steps": [
+          {
+            "name": "Download all artifacts",
+            "uses": "actions/download-artifact@v8",
+            "with": {
+              "path": "release-artifacts"
+            }
+          },
+          {
+            "name": "Flatten release files",
+            "shell": "bash",
+            "run": "set -euo pipefail\nmkdir -p release-files\nfind release-artifacts -type f -print0 | while IFS= read -r -d '' file; do\n  cp \"$file\" release-files/\"$(basename \"$file\")\"\ndone\nls -lah release-files\n"
+          },
+          {
+            "name": "Resolve tag",
+            "shell": "bash",
+            "env": {
+              "EVENT_TAG": "${{ github.event.release.tag_name }}"
+            },
+            "run": "set -euo pipefail\ntag=\"${EVENT_TAG:-${GITHUB_REF_NAME:-}}\"\nif [[ -z \"$tag\" ]]; then\n  echo \"ERROR: tag could not be resolved\"\n  exit 1\nfi\necho \"RELEASE_TAG=$tag\" >> \"$GITHUB_ENV\"\n"
+          },
+          {
+            "name": "Create or update GitHub release",
+            "uses": "softprops/action-gh-release@v2",
+            "with": {
+              "tag_name": "${{ env.RELEASE_TAG }}",
+              "generate_release_notes": true,
+              "overwrite_files": true,
+              "files": "release-files/*\n"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "shellcheck.yml": {
+    "true": {
+      "push": {
+        "paths": [
+          "**.sh",
+          "scripts/linux.d/*"
+        ]
+      },
+      "pull_request": {
+        "paths": [
+          "**.sh",
+          "scripts/linux.d/*"
+        ]
+      },
+      "schedule": [
+        {
+          "cron": "55 7 * * *"
+        }
+      ],
+      "workflow_dispatch": null
+    },
+    "name": "Shellcheck",
+    "permissions": {},
+    "jobs": {
+      "shellcheck": {
+        "name": "Shellcheck",
+        "runs-on": "ubuntu-latest",
+        "steps": [
+          {
+            "name": "Cache shellcheck download",
+            "id": "cache-shellcheck-v0_11",
+            "uses": "actions/cache@v5",
+            "with": {
+              "path": "~/shellcheck",
+              "key": "${{ runner.os }}-shellcheck-v0_11"
+            }
+          },
+          {
+            "name": "Download shellcheck",
+            "if": "steps.cache-shellcheck-v0_11.outputs.cache-hit != 'true'",
+            "shell": "bash",
+            "env": {
+              "INPUT_VERSION": "v0.11.0"
+            },
+            "run": "curl -L#o ~/sc.tar.xz \"https://github.com/koalaman/shellcheck/releases/download/${INPUT_VERSION}/shellcheck-${INPUT_VERSION}.linux.x86_64.tar.xz\"\ntar -xvf ~/sc.tar.xz -C ~\nmv ~/shellcheck-\"${INPUT_VERSION}\"/shellcheck ~/shellcheck\n"
+          },
+          {
+            "uses": "actions/checkout@v6",
+            "with": {
+              "fetch-depth": 1
+            }
+          },
+          {
+            "name": "Shellcheck scripts",
+            "run": "find . -not -name \\*.md \\( -path ./scripts/linux.d/\\* -o -name \\*.sh \\) -print0 | xargs -0 ~/shellcheck"
+          }
+        ]
+      }
+    }
+  },
+  "update-translation.yml": {
+    "name": "Update Translation Catalog",
+    "true": {
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "update_translation": {
+        "name": "Update translation",
+        "runs-on": "ubuntu-latest",
+        "steps": [
+          {
+            "name": "Checkout repository",
+            "uses": "actions/checkout@v6"
+          },
+          {
+            "name": "Setup Python",
+            "uses": "actions/setup-python@v6",
+            "with": {
+              "python-version": "3.12"
+            }
+          },
+          {
+            "name": "Install gettext",
+            "run": "sudo apt-get update\nsudo apt-get install -y gettext\n"
+          },
+          {
+            "name": "Update translation catalog",
+            "run": "./scripts/run_gettext.sh --full\ngit add localization/i18n/*\n"
+          },
+          {
+            "name": "Commit translation catalog updates",
+            "uses": "qoomon/actions--create-commit@v1",
+            "id": "commit",
+            "with": {
+              "message": "Update translation catalog",
+              "skip-empty": true
+            }
+          },
+          {
+            "name": "Push changes",
+            "run": "git push"
+          }
+        ]
+      }
+    }
+  },
+  "winget_updater.yml": {
+    "name": "Publish to WinGet",
+    "true": {
+      "release": {
+        "types": [
+          "released"
+        ]
+      }
+    },
+    "jobs": {
+      "publish": {
+        "runs-on": "windows-latest",
+        "steps": [
+          {
+            "uses": "vedantmgoyal9/winget-releaser@main",
+            "with": {
+              "identifier": "SoftFever.OrcaSlicer",
+              "version": "${{ github.event.release.tag_name }}",
+              "token": "${{ secrets.WINGET_TOKEN }}",
+              "installers-regex": "\\.exe$"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
